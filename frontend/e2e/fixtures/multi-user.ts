@@ -141,54 +141,53 @@ export const test = base.extend<{
     const createdSessions: UserSession[] = [];
 
     const createUsers = async (count: number): Promise<UserSession[]> => {
-      const sessions: UserSession[] = [];
+      // Register all users in parallel via API
+      const registrations = await Promise.all(
+        Array.from({ length: count }, (_, i) =>
+          registerUser(generateUsername(i), 'testpassword123')
+        )
+      );
 
-      for (let i = 0; i < count; i++) {
-        const displayName = generateUsername(i);
-        const password = 'testpassword123';
+      // Create browser contexts and set up auth in parallel
+      const sessions = await Promise.all(
+        registrations.map(async ({ user, token }) => {
+          const context = await browser.newContext();
+          const page = await context.newPage();
 
-        // Register user via API
-        const { user, token } = await registerUser(displayName, password);
+          // Navigate to the app and set the token in localStorage
+          await page.goto('/');
+          await page.evaluate((accessToken) => {
+            localStorage.setItem('accessToken', accessToken);
+          }, token);
 
-        // Create browser context
-        const context = await browser.newContext();
-        const page = await context.newPage();
+          // Reload to apply authentication
+          await page.reload();
 
-        // Navigate to the app and set the token in localStorage
-        await page.goto('/');
-        await page.evaluate((accessToken) => {
-          localStorage.setItem('accessToken', accessToken);
-        }, token);
+          const session: UserSession = {
+            context,
+            page,
+            user,
+            token,
+          };
 
-        // Reload to apply authentication
-        await page.reload();
-
-        const session: UserSession = {
-          context,
-          page,
-          user,
-          token,
-        };
-
-        sessions.push(session);
-        createdSessions.push(session);
-      }
+          createdSessions.push(session);
+          return session;
+        })
+      );
 
       return sessions;
     };
 
     await use(createUsers);
 
-    // Cleanup: close all browser contexts
-    for (const session of createdSessions) {
-      await session.context.close();
-    }
+    // Cleanup: close all browser contexts in parallel
+    await Promise.all(createdSessions.map((session) => session.context.close()));
   },
 
   /**
    * Creates a lobby with N users where:
    * - First user creates the lobby
-   * - All other users join the lobby
+   * - All other users join the lobby in parallel
    */
   lobbyWithUsers: async ({ createUsers }, use) => {
     const lobbyWithUsers = async (count: number): Promise<LobbyWithUsers> => {
@@ -206,11 +205,13 @@ export const test = base.extend<{
         timerDurationSeconds: 30,
       });
 
-      // All other users join the lobby
-      for (let i = 1; i < users.length; i++) {
-        const joinerClient = new ApiClient(users[i].token);
-        await joinerClient.post(`/lobbies/${lobby.id}/join`);
-      }
+      // All other users join the lobby in parallel
+      await Promise.all(
+        users.slice(1).map((user) => {
+          const joinerClient = new ApiClient(user.token);
+          return joinerClient.post(`/lobbies/${lobby.id}/join`);
+        })
+      );
 
       // Fetch the updated lobby state
       const updatedLobby = await creatorClient.get<Lobby>(`/lobbies/${lobby.id}`);

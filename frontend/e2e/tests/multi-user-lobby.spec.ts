@@ -1,5 +1,8 @@
 import { test, expect } from '../fixtures/multi-user';
-import { LobbyRoomPage, DraftRoomPage } from '../fixtures/pages';
+import { LobbyRoomPage, DraftRoomPage, waitForAnyTurn } from '../fixtures/pages';
+
+// These tests involve multiple users and WebSocket connections - run serially to avoid interference
+test.describe.configure({ mode: 'serial' });
 
 test.describe('Multi-User Lobby Flow with UI', () => {
   test('10 users can join and interact with lobby UI', async ({ lobbyWithUsers }) => {
@@ -24,12 +27,9 @@ test.describe('Multi-User Lobby Flow with UI', () => {
     for (let i = 0; i < users.length; i++) {
       const lobbyPage = lobbyPages[i];
       await lobbyPage.clickReadyUp();
-      // Small delay to avoid race conditions
-      await users[i].page.waitForTimeout(200);
+      // Wait for button to change to Cancel Ready
+      await expect(users[i].page.locator('button:has-text("Cancel Ready")')).toBeVisible();
     }
-
-    // Wait for ready state to propagate
-    await users[0].page.waitForTimeout(1000);
 
     // Refresh creator's page to see updated state
     await users[0].page.reload();
@@ -49,9 +49,6 @@ test.describe('Multi-User Lobby Flow with UI', () => {
 
     // Creator confirms selection
     await creatorPage.clickConfirmSelection();
-
-    // Wait for confirmation to process
-    await users[0].page.waitForTimeout(500);
 
     // Creator should see Start Draft button
     await expect(users[0].page.locator('button:has-text("Start Draft")')).toBeVisible({ timeout: 10000 });
@@ -98,11 +95,8 @@ test.describe('Multi-User Lobby Flow with UI', () => {
     // User 1 clicks ready
     await user1.page.click('button:has-text("Ready Up")');
 
-    // Wait for state to propagate
-    await user1.page.waitForTimeout(500);
-
-    // User 2 should see user 1's ready status update (may need to wait for poll)
-    await user2.page.waitForTimeout(3500); // Wait for 3s poll interval
+    // Wait for button to change to Cancel Ready
+    await expect(user1.page.locator('button:has-text("Cancel Ready")')).toBeVisible();
 
     // Refresh user 2's page to see the update
     await user2.page.reload();
@@ -188,11 +182,8 @@ test.describe('Multi-User Lobby Flow with UI', () => {
       // Navigate to lobby
       await users[i].page.goto(`/lobby/${lobby.id}`);
 
-      // Wait for poll to update
-      await users[0].page.waitForTimeout(3500);
+      // Reload creator's page and verify updated count
       await users[0].page.reload();
-
-      // Creator should see updated count
       await expect(users[0].page.locator(`text=${i + 1}/10`)).toBeVisible({ timeout: 5000 });
     }
   });
@@ -223,11 +214,11 @@ test.describe('Multi-User Lobby Draft Flow', () => {
     for (let i = 0; i < users.length; i++) {
       const lobbyPage = lobbyPages[i];
       await lobbyPage.clickReadyUp();
-      await users[i].page.waitForTimeout(200);
+      // Wait for button to change to Cancel Ready
+      await expect(users[i].page.locator('button:has-text("Cancel Ready")')).toBeVisible();
     }
 
-    // Wait for ready state to propagate
-    await users[0].page.waitForTimeout(1000);
+    // Reload creator's page to see updated state
     await users[0].page.reload();
 
     // Creator generates teams, selects option, and starts draft
@@ -237,7 +228,6 @@ test.describe('Multi-User Lobby Draft Flow', () => {
     await creatorPage.waitForMatchOptions();
     await creatorPage.selectOption(1);
     await creatorPage.clickConfirmSelection();
-    await users[0].page.waitForTimeout(500);
 
     // Start draft - all users will be redirected
     await expect(users[0].page.locator('button:has-text("Start Draft")')).toBeVisible({
@@ -257,28 +247,24 @@ test.describe('Multi-User Lobby Draft Flow', () => {
       await draftPage.waitForDraftLoaded();
     }
 
-    // In 10-man lobby, only 2 users (blue/red captains) can click Ready
-    // Wait for WebSocket to settle before checking
-    await draftPages[0].page.waitForTimeout(1000);
+    // Wait for WebSocket connections to establish
+    await Promise.all(draftPages.map((dp) => dp.waitForWebSocketConnected()));
 
     // Ready up via UI - only non-spectators can click Ready
     for (const draftPage of draftPages) {
       const canReady = await draftPage.canClickReady();
       if (canReady) {
         await draftPage.clickReady();
-        await draftPage.page.waitForTimeout(500);
       }
     }
-
-    // Wait for ready state to propagate via WebSocket
-    await draftPages[0].page.waitForTimeout(1500);
 
     // One of the captains should see Start Draft button
     // Find a user who can see Start Draft (wait longer for WebSocket to sync)
     let starterFound = false;
     for (const draftPage of draftPages) {
       const startButton = draftPage.page.locator('button:has-text("Start Draft")');
-      if (await startButton.isVisible({ timeout: 5000 }).catch(() => false)) {
+      const count = await startButton.count();
+      if (count > 0 && (await startButton.isVisible())) {
         await startButton.click();
         starterFound = true;
         break;
@@ -292,40 +278,18 @@ test.describe('Multi-User Lobby Draft Flow', () => {
 
     // At this point, draft is active. Blue team captain picks first (ban phase)
     // Find the user whose turn it is and perform a ban
-    let turnTaken = false;
     for (let phase = 0; phase < 6; phase++) {
-      // Go through first 6 ban phases
-      for (const draftPage of draftPages) {
-        const isMyTurn = await draftPage.isYourTurn();
-        if (isMyTurn) {
-          await draftPage.performBanOrPick(phase);
-          turnTaken = true;
-          break;
-        }
-      }
-      if (turnTaken) {
-        // Wait for phase transition
-        await draftPages[0].page.waitForTimeout(800);
-        turnTaken = false;
-      }
+      // Go through first 6 ban phases - use waitForAnyTurn for proper waiting
+      const captain = await waitForAnyTurn(draftPages, 15000);
+      await captain.performBanOrPick(phase);
     }
 
     // After 6 bans, we should be in pick phase
     // Continue with 4 pick phases
     for (let phase = 0; phase < 4; phase++) {
-      for (const draftPage of draftPages) {
-        const isMyTurn = await draftPage.isYourTurn();
-        if (isMyTurn) {
-          // Use higher indices to avoid selecting already banned champions
-          await draftPage.performBanOrPick(10 + phase);
-          turnTaken = true;
-          break;
-        }
-      }
-      if (turnTaken) {
-        await draftPages[0].page.waitForTimeout(800);
-        turnTaken = false;
-      }
+      const captain = await waitForAnyTurn(draftPages, 15000);
+      // Use higher indices to avoid selecting already banned champions
+      await captain.performBanOrPick(10 + phase);
     }
 
     // Verify that picks are visible on team panels
@@ -394,15 +358,13 @@ test.describe('Multi-User Lobby Draft Flow', () => {
 
     // Wait for all to load and WebSocket to connect
     console.log('Waiting for all pages to load and WebSocket to connect...');
-    for (let i = 0; i < draftPages.length; i++) {
-      await draftPages[i].waitForDraftLoaded();
-      await draftPages[i].waitForWebSocketConnected();
-      console.log(`User ${i} connected`);
-    }
-
-    // Add extra delay for all WebSocket states to fully settle
-    console.log('Waiting 1s for WebSocket states to settle...');
-    await draftPages[0].page.waitForTimeout(1000);
+    await Promise.all(
+      draftPages.map(async (draftPage, i) => {
+        await draftPage.waitForDraftLoaded();
+        await draftPage.waitForWebSocketConnected();
+        console.log(`User ${i} connected`);
+      })
+    );
 
     // Ready up via UI - only non-spectators can click Ready
     // In 10-man draft, only 2 users (one per team) are the actual clients
@@ -416,17 +378,12 @@ test.describe('Multi-User Lobby Draft Flow', () => {
         await draftPage.clickReady();
         readyClicks++;
         readyUsers.push(`user_${i}`);
-        await draftPage.page.waitForTimeout(500); // Let WebSocket message propagate
       }
     }
 
     // Should have clicked Ready on exactly 2 pages (blue and red clients)
     console.log(`Clicked Ready on ${readyClicks} pages: ${readyUsers.join(', ')}`);
     expect(readyClicks).toBe(2);
-
-    // Wait for ready state to propagate via WebSocket
-    console.log('Waiting for ready state to propagate via WebSocket...');
-    await draftPages[0].page.waitForTimeout(1500);
 
     // Find and click Start Draft - should be visible when both teams ready
     // No reload needed - WebSocket should sync the state
@@ -435,7 +392,8 @@ test.describe('Multi-User Lobby Draft Flow', () => {
     for (let i = 0; i < draftPages.length; i++) {
       const draftPage = draftPages[i];
       const startButton = draftPage.page.locator('button:has-text("Start Draft")');
-      const isVisible = await startButton.isVisible({ timeout: 5000 }).catch(() => false);
+      const count = await startButton.count();
+      const isVisible = count > 0 && (await startButton.isVisible());
       console.log(`User ${i}: Start Draft visible = ${isVisible}`);
       if (isVisible) {
         await startButton.click();
@@ -460,25 +418,12 @@ test.describe('Multi-User Lobby Draft Flow', () => {
     const TOTAL_PHASES = 20;
 
     for (let phase = 0; phase < TOTAL_PHASES; phase++) {
-      console.log(`Phase ${phase}: looking for player whose turn it is...`);
+      console.log(`Phase ${phase}: waiting for player turn...`);
 
-      let turnFound = false;
-      for (let i = 0; i < draftPages.length; i++) {
-        const draftPage = draftPages[i];
-        if (await draftPage.isYourTurn()) {
-          console.log(`Phase ${phase}: User ${i} taking turn`);
-          await draftPage.performBanOrPick(phase);
-          turnFound = true;
-          break;
-        }
-      }
-
-      if (!turnFound) {
-        throw new Error(`Phase ${phase}: No player found whose turn it is`);
-      }
-
-      // Wait for phase transition
-      await draftPages[0].page.waitForTimeout(800);
+      // Use waitForAnyTurn for proper Playwright waiting instead of manual polling
+      const captain = await waitForAnyTurn(draftPages, 15000);
+      console.log(`Phase ${phase}: player taking turn`);
+      await captain.performBanOrPick(phase);
     }
 
     console.log('All 20 phases complete!');
@@ -500,7 +445,7 @@ test.describe('Multi-User Lobby Error Cases', () => {
     for (const user of users) {
       await user.page.goto(`/lobby/${lobby.id}`);
       await user.page.click('button:has-text("Ready Up")');
-      await user.page.waitForTimeout(200);
+      await expect(user.page.locator('button:has-text("Cancel Ready")')).toBeVisible();
     }
 
     // Reload creator's page

@@ -1,5 +1,5 @@
 import { test, expect, setUserReady, generateTeams, selectMatchOption } from '../fixtures/multi-user';
-import { DraftRoomPage } from '../fixtures/pages';
+import { DraftRoomPage, waitForAnyTurn } from '../fixtures/pages';
 
 const API_BASE = 'http://localhost:9999/api/v1';
 
@@ -93,25 +93,22 @@ async function setupDraftFromLobby(
  * Helper to ready up and start the draft via UI
  */
 async function readyUpAndStartDraft(draftPages: DraftRoomPage[]): Promise<void> {
-  // Wait for state to settle
-  await draftPages[0].page.waitForTimeout(1000);
+  // Wait for WebSocket connections to establish
+  await Promise.all(draftPages.map((dp) => dp.waitForWebSocketConnected()));
 
   // Ready up via UI - only captains can click Ready
   for (const draftPage of draftPages) {
     const canReady = await draftPage.canClickReady();
     if (canReady) {
       await draftPage.clickReady();
-      await draftPage.page.waitForTimeout(500);
     }
   }
 
-  // Wait for ready state to propagate
-  await draftPages[0].page.waitForTimeout(1500);
-
-  // Find and click Start Draft
+  // Find and click Start Draft - use count() instead of .catch(() => false)
   for (const draftPage of draftPages) {
     const startButton = draftPage.page.locator('button:has-text("Start Draft")');
-    if (await startButton.isVisible({ timeout: 3000 }).catch(() => false)) {
+    const count = await startButton.count();
+    if (count > 0 && (await startButton.isVisible())) {
       await startButton.click();
       break;
     }
@@ -122,15 +119,14 @@ async function readyUpAndStartDraft(draftPages: DraftRoomPage[]): Promise<void> 
 }
 
 /**
- * Helper to find the captain whose turn it is
+ * Helper to find the captain whose turn it is.
+ * Uses waitForAnyTurn with proper Playwright waits instead of instant polling.
  */
-async function findCurrentTurnCaptain(draftPages: DraftRoomPage[]): Promise<DraftRoomPage | null> {
-  for (const draftPage of draftPages) {
-    if (await draftPage.isYourTurn()) {
-      return draftPage;
-    }
-  }
-  return null;
+async function findCurrentTurnCaptain(
+  draftPages: DraftRoomPage[],
+  timeout: number = 15000
+): Promise<DraftRoomPage> {
+  return await waitForAnyTurn(draftPages, timeout);
 }
 
 /**
@@ -138,12 +134,8 @@ async function findCurrentTurnCaptain(draftPages: DraftRoomPage[]): Promise<Draf
  */
 async function completePhases(draftPages: DraftRoomPage[], count: number, startIndex: number = 0): Promise<void> {
   for (let phase = 0; phase < count; phase++) {
-    const captain = await findCurrentTurnCaptain(draftPages);
-    if (!captain) {
-      throw new Error(`Phase ${phase}: No captain found for current turn`);
-    }
+    const captain = await waitForAnyTurn(draftPages, 15000);
     await captain.performBanOrPick(startIndex + phase);
-    await draftPages[0].page.waitForTimeout(800);
   }
 }
 
@@ -196,6 +188,9 @@ async function setupDraftWithShortTimer(
 // INVALID ACTION TESTS
 // ============================================================================
 
+// These tests involve 10 users and WebSocket connections - run serially to avoid interference
+test.describe.configure({ mode: 'serial' });
+
 test.describe('Draft Edge Cases: Invalid Actions', () => {
   test('banned champion button is disabled in pick phase', async ({ lobbyWithUsers }) => {
     test.setTimeout(180000);
@@ -207,29 +202,25 @@ test.describe('Draft Edge Cases: Invalid Actions', () => {
     const initialAction = await draftPages[0].getCurrentAction();
     expect(initialAction).toContain('Ban');
 
-    // Complete first ban phase and note which champion was banned
-    const captain = await findCurrentTurnCaptain(draftPages);
-    expect(captain).not.toBeNull();
+    // Complete all 6 ban phases (indices 0-5)
+    await completePhases(draftPages, 6, 0);
 
-    // Select first champion (index 0) and lock in
-    await captain!.performBanOrPick(0);
+    // Now we're in pick phase - find the captain whose turn it is
+    const pickCaptain = await findCurrentTurnCaptain(draftPages);
 
-    // Now champion at index 0 should be disabled for everyone
-    await draftPages[0].page.waitForTimeout(500);
+    // Verify that exactly 6 champions are banned by checking the ban bar
+    const bannedChamps = await pickCaptain.getBannedChampionNames();
+    expect(bannedChamps.length).toBe(6);
 
-    // Check that the banned champion is now disabled
-    const isDisabled = await draftPages[0].isChampionDisabledByIndex(0);
-    expect(isDisabled).toBe(true);
-
-    // Complete remaining 5 bans (phases 1-5)
-    await completePhases(draftPages, 5, 1);
-
-    // Now we're in pick phase - verify first 6 champions are disabled (they were banned)
-    // Check that at least a few of the early indices are disabled
-    for (let i = 0; i < 6; i++) {
-      const disabled = await draftPages[0].isChampionDisabledByIndex(i);
-      expect(disabled).toBe(true);
+    // Verify banned champions are disabled in the grid
+    for (const champName of bannedChamps) {
+      const isDisabled = await pickCaptain.isChampionDisabled(champName);
+      expect(isDisabled).toBe(true);
     }
+
+    // Verify at least one non-banned champion is enabled (the grid is functional)
+    const enabledCount = await pickCaptain.getEnabledChampionCount();
+    expect(enabledCount).toBeGreaterThan(0);
   });
 
   test('picked champion button is disabled for subsequent picks', async ({ lobbyWithUsers }) => {
@@ -243,11 +234,9 @@ test.describe('Draft Edge Cases: Invalid Actions', () => {
 
     // Now in pick phase - pick champion at index 10
     const captain = await findCurrentTurnCaptain(draftPages);
-    expect(captain).not.toBeNull();
-    await captain!.performBanOrPick(10);
+    await captain.performBanOrPick(10);
 
     // Champion at index 10 should now be disabled
-    await draftPages[0].page.waitForTimeout(500);
     const isDisabled = await draftPages[0].isChampionDisabledByIndex(10);
     expect(isDisabled).toBe(true);
   });
@@ -287,17 +276,15 @@ test.describe('Draft Edge Cases: Invalid Actions', () => {
 
     // Find the captain whose turn it is
     const captain = await findCurrentTurnCaptain(draftPages);
-    expect(captain).not.toBeNull();
 
     // Lock In should be disabled before any selection
-    await captain!.expectLockInDisabled();
+    await captain.expectLockInDisabled();
 
     // Select a champion
-    await captain!.selectChampionByIndex(0);
-    await captain!.page.waitForTimeout(300);
+    await captain.selectChampionByIndex(0);
 
     // Now Lock In should be enabled
-    await captain!.expectLockInEnabled();
+    await captain.expectLockInEnabled();
   });
 });
 
@@ -314,24 +301,20 @@ test.describe('Draft Edge Cases: Reconnection', () => {
 
     // Complete first ban (blue team)
     const blueCaptain = await findCurrentTurnCaptain(draftPages);
-    expect(blueCaptain).not.toBeNull();
-    const blueCaptainIndex = draftPages.indexOf(blueCaptain!);
+    const blueCaptainIndex = draftPages.indexOf(blueCaptain);
 
-    await blueCaptain!.performBanOrPick(0);
-    await draftPages[0].page.waitForTimeout(800);
+    await blueCaptain.performBanOrPick(0);
 
     // Now it's red team's turn - blue captain reloads
-    await blueCaptain!.reloadAndReconnect();
+    await blueCaptain.reloadAndReconnect();
 
     // Blue captain should see the ban that was made
-    const bannedChamps = await blueCaptain!.getBannedChampionNames();
+    const bannedChamps = await blueCaptain.getBannedChampionNames();
     expect(bannedChamps.length).toBeGreaterThanOrEqual(1);
 
     // Red team completes their ban
     const redCaptain = await findCurrentTurnCaptain(draftPages);
-    expect(redCaptain).not.toBeNull();
-    await redCaptain!.performBanOrPick(1);
-    await draftPages[0].page.waitForTimeout(800);
+    await redCaptain.performBanOrPick(1);
 
     // Now blue captain should be able to take their turn again
     // The reloaded page should detect it's their turn
@@ -350,14 +333,13 @@ test.describe('Draft Edge Cases: Reconnection', () => {
 
     // Find the captain whose turn it is
     const captain = await findCurrentTurnCaptain(draftPages);
-    expect(captain).not.toBeNull();
-    const captainIndex = draftPages.indexOf(captain!);
+    const captainIndex = draftPages.indexOf(captain);
 
     // Get current action before reload
-    const actionBefore = await captain!.getCurrentAction();
+    const actionBefore = await captain.getCurrentAction();
 
     // Reload during their turn
-    await captain!.reloadAndReconnect();
+    await captain.reloadAndReconnect();
 
     // Timer should still be running (check it's greater than 0)
     const timer = await draftPages[captainIndex].getTimerSeconds();
@@ -398,8 +380,7 @@ test.describe('Draft Edge Cases: Reconnection', () => {
 
     // Draft should be able to continue
     const captain = await findCurrentTurnCaptain(draftPages);
-    expect(captain).not.toBeNull();
-    await captain!.performBanOrPick(2);
+    await captain.performBanOrPick(2);
   });
 });
 
@@ -421,8 +402,8 @@ test.describe('Draft Edge Cases: Timer Expiry', () => {
     expect(initialAction.toLowerCase()).toContain('ban');
 
     // Don't take any action - let timer expire
-    // Wait for timer to tick down and phase to change (5 seconds + buffer)
-    await draftPages[0].page.waitForTimeout(7000);
+    // Wait for phase to auto-advance (timer is 5 seconds)
+    await draftPages[0].waitForPhaseChange(initialAction, 10000);
 
     // Phase should have auto-advanced to Red Ban
     const currentAction = await draftPages[0].getCurrentAction();
@@ -437,8 +418,13 @@ test.describe('Draft Edge Cases: Timer Expiry', () => {
     const { draftPages } = await setupDraftWithShortTimer(createUsers, 3);
     await readyUpAndStartDraft(draftPages);
 
-    // Let 3 phases expire (3 seconds each = ~9-12 seconds with buffer)
-    await draftPages[0].page.waitForTimeout(12000);
+    // Let 3 phases expire by waiting for the action to change 3 times
+    // Each phase is 3 seconds
+    let currentAction = await draftPages[0].getCurrentAction();
+    for (let i = 0; i < 3; i++) {
+      await draftPages[0].waitForPhaseChange(currentAction, 8000);
+      currentAction = await draftPages[0].getCurrentAction();
+    }
 
     // Should have advanced 3+ phases
     // In pro play: phases 0-2 are Blue Ban, Red Ban, Blue Ban
@@ -449,11 +435,7 @@ test.describe('Draft Edge Cases: Timer Expiry', () => {
 
     // Verify draft is still functional - next captain can act
     const captain = await findCurrentTurnCaptain(draftPages);
-    if (captain) {
-      await captain.performBanOrPick(10);
-      // Phase should advance after manual action
-      await draftPages[0].page.waitForTimeout(1000);
-    }
+    await captain.performBanOrPick(10);
   });
 });
 
@@ -470,25 +452,22 @@ test.describe('Draft Edge Cases: Race Conditions', () => {
 
     // Find the captain whose turn it is
     const captain = await findCurrentTurnCaptain(draftPages);
-    expect(captain).not.toBeNull();
 
     // Rapidly click different champions
-    await captain!.selectChampionByIndex(0);
-    await captain!.selectChampionByIndex(1);
-    await captain!.selectChampionByIndex(2);
-    await captain!.selectChampionByIndex(3);
+    await captain.selectChampionByIndex(0);
+    await captain.selectChampionByIndex(1);
+    await captain.selectChampionByIndex(2);
+    await captain.selectChampionByIndex(3);
     // Final selection
-    await captain!.selectChampionByIndex(5);
+    await captain.selectChampionByIndex(5);
 
-    // Small wait for last selection to register
-    await captain!.page.waitForTimeout(200);
+    // Lock In should work - wait for it to be enabled (indicates selection registered)
+    await captain.expectLockInEnabled();
+    await captain.clickLockIn();
 
-    // Lock In should work
-    await captain!.expectLockInEnabled();
-    await captain!.clickLockIn();
-
-    // Phase should advance
-    await captain!.page.waitForTimeout(800);
+    // Wait for Lock In to become disabled (indicates phase advanced)
+    const lockInButton = captain.page.locator('button:has-text("Lock In")');
+    await expect(lockInButton).toBeDisabled({ timeout: 5000 });
 
     // Champion at index 5 should be disabled (it was locked in)
     const isDisabled = await draftPages[0].isChampionDisabledByIndex(5);
@@ -501,26 +480,28 @@ test.describe('Draft Edge Cases: Race Conditions', () => {
     const { draftPages } = await setupDraftFromLobby(lobbyWithUsers);
     await readyUpAndStartDraft(draftPages);
 
-    // Get initial action
-    const initialAction = await draftPages[0].getCurrentAction();
-
-    // Find the captain
+    // Find the captain whose turn it is
     const captain = await findCurrentTurnCaptain(draftPages);
-    expect(captain).not.toBeNull();
 
-    // Select a champion
-    await captain!.selectChampionByIndex(0);
-    await captain!.page.waitForTimeout(200);
+    // Get initial action from captain's page
+    const initialAction = await captain.getCurrentAction();
+
+    // Select a champion and wait for Lock In to be enabled
+    await captain.selectChampionByIndex(0);
+    const lockInButton = captain.page.locator('button:has-text("Lock In")');
+    await expect(lockInButton).toBeEnabled({ timeout: 3000 });
 
     // Rapidly double-click Lock In
-    const lockInButton = captain!.page.locator('button:has-text("Lock In")');
     await lockInButton.dblclick();
 
-    // Wait for phase to advance
-    await captain!.page.waitForTimeout(1000);
+    // Wait for Lock In to become disabled (phase advanced)
+    await expect(lockInButton).toBeDisabled({ timeout: 5000 });
 
-    // Get current action - should have advanced exactly once
-    const currentAction = await draftPages[0].getCurrentAction();
+    // Wait for phase to change on captain's page
+    await captain.waitForPhaseChange(initialAction, 5000);
+
+    // Get current action from captain's page - should have advanced exactly once
+    const currentAction = await captain.getCurrentAction();
     expect(currentAction).not.toBe(initialAction);
 
     // Verify we're on second ban phase (Red Ban), not third
@@ -529,7 +510,7 @@ test.describe('Draft Edge Cases: Race Conditions', () => {
     expect(currentAction.toLowerCase()).toContain('ban');
 
     // Only 1 champion should be banned (not 2)
-    const bannedCount = await draftPages[0].getBannedChampionNames();
+    const bannedCount = await captain.getBannedChampionNames();
     expect(bannedCount.length).toBe(1);
   });
 });

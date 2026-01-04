@@ -364,22 +364,22 @@ export class DraftRoomPage {
     await expect(this.page.locator('text=Disconnected')).not.toBeVisible({ timeout: 10000 });
     // Wait for at least one player name to appear (indicates state sync)
     await expect(this.page.locator('.text-lol-gold-light').first()).toBeVisible({ timeout: 10000 });
-    // Extra wait for state to fully settle
-    await this.page.waitForTimeout(500);
   }
 
   async isSpectator(): Promise<boolean> {
     // Spectators don't see the Ready button after state sync
-    // Use exact text match to avoid matching "Cancel Ready"
+    // Use count() which returns 0 without throwing if element doesn't exist
     const readyButton = this.page.locator('button:text-is("Ready")');
-    return !(await readyButton.isVisible({ timeout: 3000 }).catch(() => false));
+    const count = await readyButton.count();
+    return count === 0;
   }
 
   async canClickReady(): Promise<boolean> {
     // Check if Ready button is visible and clickable (non-spectator)
-    // Use exact text match to avoid matching "Cancel Ready"
+    // Use count() to check existence without throwing
     const readyButton = this.page.locator('button:text-is("Ready")');
-    return await readyButton.isVisible({ timeout: 3000 }).catch(() => false);
+    const count = await readyButton.count();
+    return count > 0 && (await readyButton.isVisible());
   }
 
   async waitForActiveState() {
@@ -456,11 +456,11 @@ export class DraftRoomPage {
     return isChampDisabled === null;
   }
 
-  async waitForYourTurn() {
+  async waitForYourTurn(timeout: number = 30000) {
     // Wait until champion buttons become clickable
     await expect(
       this.page.locator('[data-testid="champion-grid"] button:not([disabled])').first()
-    ).toBeVisible({ timeout: 30000 });
+    ).toBeVisible({ timeout });
   }
 
   async waitForNotYourTurn() {
@@ -492,20 +492,41 @@ export class DraftRoomPage {
   }
 
   async performBanOrPick(championIndex: number = 0) {
-    // Select a champion and lock in
-    // Fail fast if we can't complete within 5 seconds
-    await this.selectChampionByIndex(championIndex);
-    await this.page.waitForTimeout(300);
-
-    // Verify Lock In button is enabled before clicking
     const lockInButton = this.page.locator('button:has-text("Lock In")');
-    const isEnabled = await lockInButton.isEnabled({ timeout: 3000 }).catch(() => false);
-    if (!isEnabled) {
-      throw new Error(`Lock In button not enabled after selecting champion ${championIndex}`);
-    }
 
-    await this.clickLockIn();
-    await this.page.waitForTimeout(500);
+    // Get state before action for verification
+    const bannedBefore = (await this.getBannedChampionNames()).length;
+    // Count picked champions by looking at champion name labels in team panels
+    // (text-lol-gold.text-sm.font-beaufort elements are champion names shown after picks)
+    const pickedBefore = await this.page
+      .locator('.bg-lol-dark-blue .text-lol-gold.text-sm.font-beaufort')
+      .count();
+
+    // Select champion - Playwright auto-retries clicks
+    await this.selectChampionByIndex(championIndex);
+
+    // Wait for Lock In to enable (confirms WebSocket registered selection)
+    await expect(lockInButton).toBeEnabled({ timeout: 5000 });
+
+    // Click Lock In
+    await lockInButton.click();
+
+    // Wait for phase to ACTUALLY advance by checking either:
+    // 1. Ban count increases (ban phase)
+    // 2. Pick count increases (pick phase)
+    // This handles consecutive same-side phases (e.g., R-R in B-R-R-B pick sequence)
+    await expect
+      .poll(
+        async () => {
+          const bannedAfter = (await this.getBannedChampionNames()).length;
+          const pickedAfter = await this.page
+            .locator('.bg-lol-dark-blue .text-lol-gold.text-sm.font-beaufort')
+            .count();
+          return bannedAfter > bannedBefore || pickedAfter > pickedBefore;
+        },
+        { timeout: 10000, intervals: [200, 500, 1000] }
+      )
+      .toBe(true);
   }
 
   // ========== Edge Case Test Helpers ==========
@@ -549,16 +570,16 @@ export class DraftRoomPage {
   }
 
   async waitForTimerBelow(seconds: number, timeout: number = 30000): Promise<void> {
-    // Wait until timer drops below a certain value
-    const startTime = Date.now();
-    while (Date.now() - startTime < timeout) {
-      const current = await this.getTimerSeconds();
-      if (current > 0 && current <= seconds) {
-        return;
-      }
-      await this.page.waitForTimeout(500);
-    }
-    throw new Error(`Timer did not drop below ${seconds}s within ${timeout}ms`);
+    // Wait until timer drops below a certain value using Playwright's auto-retry
+    await expect
+      .poll(
+        async () => {
+          const current = await this.getTimerSeconds();
+          return current > 0 && current <= seconds;
+        },
+        { timeout, intervals: [500, 1000, 1000] }
+      )
+      .toBe(true);
   }
 
   async getBannedChampionNames(): Promise<string[]> {
@@ -592,8 +613,10 @@ export class DraftRoomPage {
 
   async isDraftComplete(): Promise<boolean> {
     // Check if "Complete" text is shown in the timer area
+    // Use count() to check existence without throwing
     const completeText = this.page.locator('text=Complete');
-    return completeText.isVisible({ timeout: 1000 }).catch(() => false);
+    const count = await completeText.count();
+    return count > 0;
   }
 
   async reloadAndReconnect(): Promise<void> {
@@ -602,4 +625,34 @@ export class DraftRoomPage {
     await this.waitForDraftLoaded();
     await this.waitForWebSocketConnected();
   }
+}
+
+/**
+ * Wait for any of the given draft pages to get their turn.
+ * Uses Promise.race with proper Playwright waits instead of manual polling.
+ */
+export async function waitForAnyTurn(
+  draftPages: DraftRoomPage[],
+  timeout: number = 15000
+): Promise<DraftRoomPage> {
+  // Create a promise for each page that resolves when it gets its turn
+  const turnPromises = draftPages.map(async (draftPage, index) => {
+    try {
+      await draftPage.waitForYourTurn(timeout);
+      return { draftPage, index };
+    } catch {
+      // This page didn't get turn within timeout - return never-resolving promise
+      // so Promise.race continues waiting for others
+      return new Promise<never>(() => {});
+    }
+  });
+
+  // Race all pages - first to get their turn wins
+  const result = await Promise.race(turnPromises);
+
+  if (!result || !result.draftPage) {
+    throw new Error(`No page received turn within ${timeout}ms`);
+  }
+
+  return result.draftPage;
 }
