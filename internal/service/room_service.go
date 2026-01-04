@@ -10,6 +10,7 @@ import (
 	"github.com/dom/league-draft-website/internal/domain"
 	"github.com/dom/league-draft-website/internal/repository"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 var (
@@ -74,13 +75,25 @@ func (s *RoomService) CreateRoom(ctx context.Context, input CreateRoomInput) (*d
 }
 
 func (s *RoomService) GetRoom(ctx context.Context, idOrCode string) (*domain.Room, error) {
+	var room *domain.Room
+	var err error
+
 	// Try UUID first
-	if id, err := uuid.Parse(idOrCode); err == nil {
-		return s.roomRepo.GetByID(ctx, id)
+	if id, parseErr := uuid.Parse(idOrCode); parseErr == nil {
+		room, err = s.roomRepo.GetByID(ctx, id)
+	} else {
+		// Try short code
+		room, err = s.roomRepo.GetByShortCode(ctx, strings.ToUpper(idOrCode))
 	}
 
-	// Try short code
-	return s.roomRepo.GetByShortCode(ctx, strings.ToUpper(idOrCode))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrRoomNotFound
+		}
+		return nil, err
+	}
+
+	return room, nil
 }
 
 func (s *RoomService) JoinRoom(ctx context.Context, roomID uuid.UUID, userID uuid.UUID, side domain.Side) (*domain.Room, error) {

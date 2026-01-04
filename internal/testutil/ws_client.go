@@ -1,0 +1,336 @@
+package testutil
+
+import (
+	"encoding/json"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/dom/league-draft-website/internal/websocket"
+	gorillaWS "github.com/gorilla/websocket"
+)
+
+// WSClient is a test WebSocket client
+type WSClient struct {
+	t        *testing.T
+	conn     *gorillaWS.Conn
+	messages chan *websocket.Message
+	errors   chan error
+	done     chan struct{}
+	mu       sync.Mutex
+}
+
+// NewWSClient creates a new WebSocket test client
+func NewWSClient(t *testing.T, url string) *WSClient {
+	t.Helper()
+
+	dialer := gorillaWS.DefaultDialer
+	dialer.HandshakeTimeout = 5 * time.Second
+
+	conn, _, err := dialer.Dial(url, nil)
+	if err != nil {
+		t.Fatalf("failed to connect to websocket: %v", err)
+	}
+
+	client := &WSClient{
+		t:        t,
+		conn:     conn,
+		messages: make(chan *websocket.Message, 100),
+		errors:   make(chan error, 10),
+		done:     make(chan struct{}),
+	}
+
+	go client.readPump()
+
+	t.Cleanup(func() {
+		// Give time for any pending operations to complete
+		time.Sleep(200 * time.Millisecond)
+		client.Close()
+	})
+
+	return client
+}
+
+// readPump reads messages from the WebSocket connection
+func (c *WSClient) readPump() {
+	defer close(c.messages)
+	for {
+		select {
+		case <-c.done:
+			return
+		default:
+			_, data, err := c.conn.ReadMessage()
+			if err != nil {
+				select {
+				case <-c.done:
+					return
+				case c.errors <- err:
+				}
+				return
+			}
+
+			var msg websocket.Message
+			if err := json.Unmarshal(data, &msg); err != nil {
+				c.errors <- err
+				continue
+			}
+
+			select {
+			case c.messages <- &msg:
+			case <-c.done:
+				return
+			}
+		}
+	}
+}
+
+// Close closes the WebSocket connection
+func (c *WSClient) Close() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	select {
+	case <-c.done:
+		return
+	default:
+		close(c.done)
+		// Give the server time to process any pending messages
+		time.Sleep(100 * time.Millisecond)
+		c.conn.WriteMessage(gorillaWS.CloseMessage, gorillaWS.FormatCloseMessage(gorillaWS.CloseNormalClosure, ""))
+		c.conn.Close()
+	}
+}
+
+// sendMessage sends a message to the server
+func (c *WSClient) sendMessage(msgType websocket.MessageType, payload interface{}) {
+	c.t.Helper()
+
+	msg, err := websocket.NewMessage(msgType, payload)
+	if err != nil {
+		c.t.Fatalf("failed to create message: %v", err)
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		c.t.Fatalf("failed to marshal message: %v", err)
+	}
+
+	c.mu.Lock()
+	err = c.conn.WriteMessage(gorillaWS.TextMessage, data)
+	c.mu.Unlock()
+
+	if err != nil {
+		c.t.Fatalf("failed to send message: %v", err)
+	}
+}
+
+// JoinRoom sends a JOIN_ROOM message
+func (c *WSClient) JoinRoom(roomID, side string) {
+	c.sendMessage(websocket.MessageTypeJoinRoom, websocket.JoinRoomPayload{
+		RoomID: roomID,
+		Side:   side,
+	})
+}
+
+// Ready sends a READY message
+func (c *WSClient) Ready(ready bool) {
+	c.sendMessage(websocket.MessageTypeReady, websocket.ReadyPayload{
+		Ready: ready,
+	})
+}
+
+// StartDraft sends a START_DRAFT message
+func (c *WSClient) StartDraft() {
+	c.sendMessage(websocket.MessageTypeStartDraft, nil)
+}
+
+// SelectChampion sends a SELECT_CHAMPION message
+func (c *WSClient) SelectChampion(championID string) {
+	c.sendMessage(websocket.MessageTypeSelectChampion, websocket.SelectChampionPayload{
+		ChampionID: championID,
+	})
+}
+
+// LockIn sends a LOCK_IN message
+func (c *WSClient) LockIn() {
+	c.sendMessage(websocket.MessageTypeLockIn, nil)
+}
+
+// HoverChampion sends a HOVER_CHAMPION message
+func (c *WSClient) HoverChampion(championID *string) {
+	c.sendMessage(websocket.MessageTypeHoverChampion, websocket.HoverChampionPayload{
+		ChampionID: championID,
+	})
+}
+
+// SyncState sends a SYNC_STATE message
+func (c *WSClient) SyncState() {
+	c.sendMessage(websocket.MessageTypeSyncState, nil)
+}
+
+// ExpectMessage waits for a message of the specified type
+func (c *WSClient) ExpectMessage(msgType websocket.MessageType, timeout time.Duration) *websocket.Message {
+	c.t.Helper()
+
+	deadline := time.After(timeout)
+	for {
+		select {
+		case msg := <-c.messages:
+			if msg == nil {
+				c.t.Fatalf("connection closed while waiting for %s", msgType)
+			}
+			if msg.Type == msgType {
+				return msg
+			}
+			// Skip other message types (like TIMER_TICK)
+		case err := <-c.errors:
+			c.t.Fatalf("error while waiting for %s: %v", msgType, err)
+		case <-deadline:
+			c.t.Fatalf("timeout waiting for message type %s", msgType)
+		}
+	}
+}
+
+// ExpectStateSync waits for and decodes a STATE_SYNC message
+func (c *WSClient) ExpectStateSync(timeout time.Duration) *websocket.StateSyncPayload {
+	c.t.Helper()
+
+	msg := c.ExpectMessage(websocket.MessageTypeStateSync, timeout)
+
+	var payload websocket.StateSyncPayload
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		c.t.Fatalf("failed to decode state sync payload: %v", err)
+	}
+
+	return &payload
+}
+
+// ExpectPlayerUpdate waits for and decodes a PLAYER_UPDATE message
+func (c *WSClient) ExpectPlayerUpdate(timeout time.Duration) *websocket.PlayerUpdatePayload {
+	c.t.Helper()
+
+	msg := c.ExpectMessage(websocket.MessageTypePlayerUpdate, timeout)
+
+	var payload websocket.PlayerUpdatePayload
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		c.t.Fatalf("failed to decode player update payload: %v", err)
+	}
+
+	return &payload
+}
+
+// ExpectDraftStarted waits for and decodes a DRAFT_STARTED message
+func (c *WSClient) ExpectDraftStarted(timeout time.Duration) *websocket.DraftStartedPayload {
+	c.t.Helper()
+
+	msg := c.ExpectMessage(websocket.MessageTypeDraftStarted, timeout)
+
+	var payload websocket.DraftStartedPayload
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		c.t.Fatalf("failed to decode draft started payload: %v", err)
+	}
+
+	return &payload
+}
+
+// ExpectPhaseChanged waits for and decodes a PHASE_CHANGED message
+func (c *WSClient) ExpectPhaseChanged(timeout time.Duration) *websocket.PhaseChangedPayload {
+	c.t.Helper()
+
+	msg := c.ExpectMessage(websocket.MessageTypePhaseChanged, timeout)
+
+	var payload websocket.PhaseChangedPayload
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		c.t.Fatalf("failed to decode phase changed payload: %v", err)
+	}
+
+	return &payload
+}
+
+// ExpectChampionSelected waits for and decodes a CHAMPION_SELECTED message
+func (c *WSClient) ExpectChampionSelected(timeout time.Duration) *websocket.ChampionSelectedPayload {
+	c.t.Helper()
+
+	msg := c.ExpectMessage(websocket.MessageTypeChampionSelected, timeout)
+
+	var payload websocket.ChampionSelectedPayload
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		c.t.Fatalf("failed to decode champion selected payload: %v", err)
+	}
+
+	return &payload
+}
+
+// ExpectDraftCompleted waits for and decodes a DRAFT_COMPLETED message
+func (c *WSClient) ExpectDraftCompleted(timeout time.Duration) *websocket.DraftCompletedPayload {
+	c.t.Helper()
+
+	msg := c.ExpectMessage(websocket.MessageTypeDraftCompleted, timeout)
+
+	var payload websocket.DraftCompletedPayload
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		c.t.Fatalf("failed to decode draft completed payload: %v", err)
+	}
+
+	return &payload
+}
+
+// ExpectError waits for and decodes an ERROR message
+func (c *WSClient) ExpectError(timeout time.Duration) *websocket.ErrorPayload {
+	c.t.Helper()
+
+	msg := c.ExpectMessage(websocket.MessageTypeError, timeout)
+
+	var payload websocket.ErrorPayload
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		c.t.Fatalf("failed to decode error payload: %v", err)
+	}
+
+	return &payload
+}
+
+// ExpectErrorWithCode waits for an error with a specific code
+func (c *WSClient) ExpectErrorWithCode(code string, timeout time.Duration) *websocket.ErrorPayload {
+	c.t.Helper()
+
+	payload := c.ExpectError(timeout)
+	if payload.Code != code {
+		c.t.Fatalf("expected error code %s, got %s: %s", code, payload.Code, payload.Message)
+	}
+
+	return payload
+}
+
+// ExpectNoMessage verifies no messages are received within timeout
+func (c *WSClient) ExpectNoMessage(timeout time.Duration) {
+	c.t.Helper()
+
+	select {
+	case msg := <-c.messages:
+		if msg != nil && msg.Type != websocket.MessageTypeTimerTick {
+			c.t.Fatalf("unexpected message received: %s", msg.Type)
+		}
+	case <-time.After(timeout):
+		// Expected - no message received
+	}
+}
+
+// DrainMessages drains all pending messages from the channel
+func (c *WSClient) DrainMessages() {
+	for {
+		select {
+		case <-c.messages:
+		default:
+			return
+		}
+	}
+}
+
+// WaitForConnection waits for the initial connection to be established
+func (c *WSClient) WaitForConnection(timeout time.Duration) {
+	c.t.Helper()
+
+	// The connection is already established in NewWSClient
+	// This is just for symmetry in tests
+	time.Sleep(50 * time.Millisecond)
+}
