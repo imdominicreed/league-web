@@ -164,7 +164,7 @@ func NewTestServer(t *testing.T) *TestServer {
 	go hub.Run()
 
 	services := service.NewServices(repos, cfg)
-	router := api.NewRouter(services, hub, cfg)
+	router := api.NewRouter(services, hub, repos, cfg)
 
 	server := httptest.NewServer(router)
 

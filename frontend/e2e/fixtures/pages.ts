@@ -340,3 +340,170 @@ export async function setAuthToken(page: Page, token: string): Promise<void> {
   }, token);
   await page.reload();
 }
+
+/**
+ * Draft Room page interactions
+ */
+export class DraftRoomPage {
+  constructor(public readonly page: Page) {}
+
+  async goto(roomId: string) {
+    await this.page.goto(`/draft/${roomId}`);
+  }
+
+  async waitForDraftLoaded() {
+    // Wait for either waiting state or active draft
+    await expect(
+      this.page.locator('text=Waiting for Players').or(this.page.locator('text=Lock In'))
+    ).toBeVisible({ timeout: 30000 });
+  }
+
+  async waitForWebSocketConnected() {
+    // Wait for WebSocket to connect by checking that "Disconnected" is not visible
+    // and that player names appear in team panels
+    await expect(this.page.locator('text=Disconnected')).not.toBeVisible({ timeout: 10000 });
+    // Wait for at least one player name to appear (indicates state sync)
+    await expect(this.page.locator('.text-lol-gold-light').first()).toBeVisible({ timeout: 10000 });
+    // Extra wait for state to fully settle
+    await this.page.waitForTimeout(500);
+  }
+
+  async isSpectator(): Promise<boolean> {
+    // Spectators don't see the Ready button after state sync
+    // Use exact text match to avoid matching "Cancel Ready"
+    const readyButton = this.page.locator('button:text-is("Ready")');
+    return !(await readyButton.isVisible({ timeout: 3000 }).catch(() => false));
+  }
+
+  async canClickReady(): Promise<boolean> {
+    // Check if Ready button is visible and clickable (non-spectator)
+    // Use exact text match to avoid matching "Cancel Ready"
+    const readyButton = this.page.locator('button:text-is("Ready")');
+    return await readyButton.isVisible({ timeout: 3000 }).catch(() => false);
+  }
+
+  async waitForActiveState() {
+    // Wait for the champion grid (Lock In button) to appear
+    await expect(this.page.locator('button:has-text("Lock In")')).toBeVisible({ timeout: 30000 });
+    // Also wait for champions to be loaded in the grid
+    await this.waitForChampionsLoaded();
+  }
+
+  async waitForChampionsLoaded() {
+    // Wait for at least one champion image to appear in the grid
+    await expect(
+      this.page.locator('[data-testid="champion-grid"] button img').first()
+    ).toBeVisible({ timeout: 5000 });
+  }
+
+  async waitForWaitingState() {
+    await expect(this.page.locator('text=Waiting for Players')).toBeVisible({ timeout: 15000 });
+  }
+
+  async isWaitingForPlayers(): Promise<boolean> {
+    return this.page.locator('text=Waiting for Players').isVisible();
+  }
+
+  async clickReady() {
+    await this.page.click('button:text-is("Ready")');
+  }
+
+  async clickStartDraft() {
+    await this.page.click('button:has-text("Start Draft")');
+  }
+
+  async expectStartDraftButton() {
+    await expect(this.page.locator('button:has-text("Start Draft")')).toBeVisible({
+      timeout: 10000,
+    });
+  }
+
+  async selectChampion(championName: string) {
+    // Click on a champion in the grid by name
+    // Use force:true because the img element intercepts pointer events
+    const championButton = this.page.locator(`button:has(img[alt="${championName}"])`);
+    await championButton.click({ force: true });
+  }
+
+  async selectChampionByIndex(index: number) {
+    // Select the nth available champion in the grid
+    // Use force:true because the img element intercepts pointer events
+    const championButtons = this.page.locator(
+      '[data-testid="champion-grid"] button:not([disabled])'
+    );
+    await championButtons.nth(index).click({ force: true });
+  }
+
+  async clickLockIn() {
+    await this.page.click('button:has-text("Lock In")');
+  }
+
+  async expectLockInEnabled() {
+    const lockInButton = this.page.locator('button:has-text("Lock In")');
+    await expect(lockInButton).toBeEnabled();
+  }
+
+  async expectLockInDisabled() {
+    const lockInButton = this.page.locator('button:has-text("Lock In")');
+    await expect(lockInButton).toBeDisabled();
+  }
+
+  async isYourTurn(): Promise<boolean> {
+    // When it's your turn, champion buttons are clickable (not disabled)
+    const championButtons = this.page.locator('[data-testid="champion-grid"] button');
+    const firstButton = championButtons.first();
+    const isChampDisabled = await firstButton.getAttribute('disabled');
+    return isChampDisabled === null;
+  }
+
+  async waitForYourTurn() {
+    // Wait until champion buttons become clickable
+    await expect(
+      this.page.locator('[data-testid="champion-grid"] button:not([disabled])').first()
+    ).toBeVisible({ timeout: 30000 });
+  }
+
+  async waitForNotYourTurn() {
+    // Wait until champion buttons become disabled (opponent's turn)
+    await expect(
+      this.page.locator('[data-testid="champion-grid"] button[disabled]').first()
+    ).toBeVisible({ timeout: 30000 });
+  }
+
+  async expectPicksVisible() {
+    // Check that team panels show picked champions
+    await expect(this.page.locator('.text-lol-gold.font-beaufort').first()).toBeVisible();
+  }
+
+  async expectDraftComplete() {
+    await expect(this.page.locator('text=Draft Complete')).toBeVisible({ timeout: 30000 });
+  }
+
+  async getRoomCode(): Promise<string> {
+    const codeElement = this.page.locator('text=Room:').locator('span.font-mono');
+    return (await codeElement.textContent()) || '';
+  }
+
+  async getYourSide(): Promise<'blue' | 'red' | 'spectator' | null> {
+    // Determine side by looking at team panel highlighting or other indicators
+    // This is simplified - in practice we'd need to check the actual UI state
+    return null;
+  }
+
+  async performBanOrPick(championIndex: number = 0) {
+    // Select a champion and lock in
+    // Fail fast if we can't complete within 5 seconds
+    await this.selectChampionByIndex(championIndex);
+    await this.page.waitForTimeout(300);
+
+    // Verify Lock In button is enabled before clicking
+    const lockInButton = this.page.locator('button:has-text("Lock In")');
+    const isEnabled = await lockInButton.isEnabled({ timeout: 3000 }).catch(() => false);
+    if (!isEnabled) {
+      throw new Error(`Lock In button not enabled after selecting champion ${championIndex}`);
+    }
+
+    await this.clickLockIn();
+    await this.page.waitForTimeout(500);
+  }
+}

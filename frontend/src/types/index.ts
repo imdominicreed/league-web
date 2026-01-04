@@ -49,6 +49,8 @@ export interface RoomState {
     red: Player | null
   }
   yourSide: 'blue' | 'red' | 'spectator' | null
+  isCaptain: boolean
+  isTeamDraft: boolean
   spectatorCount: number
 }
 
@@ -180,6 +182,8 @@ export interface StateSyncPayload {
     red: Player | null
   }
   yourSide: Side
+  isCaptain: boolean
+  isTeamDraft: boolean
   spectatorCount: number
   fearlessBans?: string[]
 }

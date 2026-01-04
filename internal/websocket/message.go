@@ -71,12 +71,14 @@ type ReadyPayload struct {
 // Server to Client payloads
 
 type StateSyncPayload struct {
-	Room           RoomInfo       `json:"room"`
-	Draft          DraftInfo      `json:"draft"`
-	Players        PlayersInfo    `json:"players"`
-	YourSide       string         `json:"yourSide"`
-	SpectatorCount int            `json:"spectatorCount"`
-	FearlessBans   []string       `json:"fearlessBans,omitempty"`
+	Room           RoomInfo    `json:"room"`
+	Draft          DraftInfo   `json:"draft"`
+	Players        PlayersInfo `json:"players"`
+	YourSide       string      `json:"yourSide"`
+	IsCaptain      bool        `json:"isCaptain"`
+	IsTeamDraft    bool        `json:"isTeamDraft"`
+	SpectatorCount int         `json:"spectatorCount"`
+	FearlessBans   []string    `json:"fearlessBans,omitempty"`
 }
 
 type RoomInfo struct {

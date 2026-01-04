@@ -6,13 +6,14 @@ import (
 	"github.com/dom/league-draft-website/internal/api/handlers"
 	"github.com/dom/league-draft-website/internal/api/middleware"
 	"github.com/dom/league-draft-website/internal/config"
+	"github.com/dom/league-draft-website/internal/repository"
 	"github.com/dom/league-draft-website/internal/service"
 	"github.com/dom/league-draft-website/internal/websocket"
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 )
 
-func NewRouter(services *service.Services, hub *websocket.Hub, cfg *config.Config) http.Handler {
+func NewRouter(services *service.Services, hub *websocket.Hub, repos *repository.Repositories, cfg *config.Config) http.Handler {
 	r := chi.NewRouter()
 
 	// Global middleware
@@ -28,7 +29,7 @@ func NewRouter(services *service.Services, hub *websocket.Hub, cfg *config.Confi
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(services.Auth)
-	roomHandler := handlers.NewRoomHandler(services.Room, hub)
+	roomHandler := handlers.NewRoomHandler(services.Room, hub, repos.RoomPlayer)
 	championHandler := handlers.NewChampionHandler(services.Champion)
 	profileHandler := handlers.NewProfileHandler(services.Profile)
 	lobbyHandler := handlers.NewLobbyHandler(services.Lobby, services.Matchmaking, hub)

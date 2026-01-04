@@ -8,6 +8,8 @@ interface RoomSliceState {
     red: Player | null
   }
   spectatorCount: number
+  isCaptain: boolean
+  isTeamDraft: boolean
   connectionStatus: 'disconnected' | 'connecting' | 'connected'
   error: string | null
 }
@@ -19,6 +21,8 @@ const initialState: RoomSliceState = {
     red: null,
   },
   spectatorCount: 0,
+  isCaptain: false,
+  isTeamDraft: false,
   connectionStatus: 'disconnected',
   error: null,
 }
@@ -30,10 +34,16 @@ const roomSlice = createSlice({
     setRoom: (state, action: PayloadAction<Room>) => {
       state.room = action.payload
     },
-    syncRoom: (state, action: PayloadAction<{ room: Room; players: { blue: Player | null; red: Player | null }; spectatorCount: number }>) => {
+    syncRoom: (state, action: PayloadAction<{ room: Room; players: { blue: Player | null; red: Player | null }; spectatorCount: number; isCaptain?: boolean; isTeamDraft?: boolean }>) => {
       state.room = action.payload.room
       state.players = action.payload.players
       state.spectatorCount = action.payload.spectatorCount
+      if (action.payload.isCaptain !== undefined) {
+        state.isCaptain = action.payload.isCaptain
+      }
+      if (action.payload.isTeamDraft !== undefined) {
+        state.isTeamDraft = action.payload.isTeamDraft
+      }
     },
     playerUpdate: (state, action: PayloadAction<{ side: string; player: Player | null; action: string }>) => {
       const { side, player } = action.payload

@@ -7,21 +7,25 @@ import (
 
 	"github.com/dom/league-draft-website/internal/api/middleware"
 	"github.com/dom/league-draft-website/internal/domain"
+	"github.com/dom/league-draft-website/internal/repository"
 	"github.com/dom/league-draft-website/internal/service"
 	"github.com/dom/league-draft-website/internal/websocket"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type RoomHandler struct {
-	roomService *service.RoomService
-	hub         *websocket.Hub
+	roomService    *service.RoomService
+	hub            *websocket.Hub
+	roomPlayerRepo repository.RoomPlayerRepository
 }
 
-func NewRoomHandler(roomService *service.RoomService, hub *websocket.Hub) *RoomHandler {
+func NewRoomHandler(roomService *service.RoomService, hub *websocket.Hub, roomPlayerRepo repository.RoomPlayerRepository) *RoomHandler {
 	return &RoomHandler{
-		roomService: roomService,
-		hub:         hub,
+		roomService:    roomService,
+		hub:            hub,
+		roomPlayerRepo: roomPlayerRepo,
 	}
 }
 
@@ -166,17 +170,39 @@ func (h *RoomHandler) Join(w http.ResponseWriter, r *http.Request) {
 	// Support auto-assignment
 	assignedSide := side
 	if req.Side == "auto" {
-		// First check if user is already assigned to a side (handles rejoins/refreshes)
-		if room.BlueSideUserID != nil && *room.BlueSideUserID == userID {
-			assignedSide = domain.SideBlue
-		} else if room.RedSideUserID != nil && *room.RedSideUserID == userID {
-			assignedSide = domain.SideRed
-		} else if room.BlueSideUserID == nil {
-			assignedSide = domain.SideBlue
-		} else if room.RedSideUserID == nil {
-			assignedSide = domain.SideRed
+		// For team draft rooms, check RoomPlayer table for assignment
+		if room.IsTeamDraft {
+			roomPlayer, err := h.roomPlayerRepo.GetByRoomAndUser(r.Context(), room.ID, userID)
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				http.Error(w, "Internal server error", http.StatusInternalServerError)
+				return
+			}
+			if roomPlayer != nil {
+				// Player has an assignment in the team draft
+				if roomPlayer.Team == domain.SideBlue {
+					assignedSide = domain.SideBlue
+				} else if roomPlayer.Team == domain.SideRed {
+					assignedSide = domain.SideRed
+				} else {
+					assignedSide = domain.SideSpectator
+				}
+			} else {
+				// Not part of the team draft, join as spectator
+				assignedSide = domain.SideSpectator
+			}
 		} else {
-			assignedSide = domain.SideSpectator
+			// Regular room: first check if user is already assigned to a side (handles rejoins/refreshes)
+			if room.BlueSideUserID != nil && *room.BlueSideUserID == userID {
+				assignedSide = domain.SideBlue
+			} else if room.RedSideUserID != nil && *room.RedSideUserID == userID {
+				assignedSide = domain.SideRed
+			} else if room.BlueSideUserID == nil {
+				assignedSide = domain.SideBlue
+			} else if room.RedSideUserID == nil {
+				assignedSide = domain.SideRed
+			} else {
+				assignedSide = domain.SideSpectator
+			}
 		}
 	} else if side != domain.SideBlue && side != domain.SideRed && side != domain.SideSpectator {
 		assignedSide = domain.SideSpectator

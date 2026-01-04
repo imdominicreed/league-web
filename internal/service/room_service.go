@@ -102,6 +102,12 @@ func (s *RoomService) JoinRoom(ctx context.Context, roomID uuid.UUID, userID uui
 		return nil, ErrRoomNotFound
 	}
 
+	// In team draft mode, BlueSideUserID/RedSideUserID are not used
+	// Players are tracked via RoomPlayer table instead
+	if room.IsTeamDraft {
+		return room, nil
+	}
+
 	switch side {
 	case domain.SideBlue:
 		if room.BlueSideUserID != nil && *room.BlueSideUserID != userID {

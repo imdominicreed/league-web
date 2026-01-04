@@ -39,7 +39,7 @@ func main() {
 	services := service.NewServices(repos, cfg)
 
 	// Initialize router
-	router := api.NewRouter(services, hub, cfg)
+	router := api.NewRouter(services, hub, repos, cfg)
 
 	// Create server
 	srv := &http.Server{

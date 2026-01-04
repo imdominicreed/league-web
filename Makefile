@@ -1,4 +1,4 @@
-.PHONY: help dev dev-backend dev-frontend db db-stop build test lint clean docker-up docker-down sync-champions
+.PHONY: help dev dev-backend dev-frontend db db-stop db-clean build test lint clean docker-up docker-down sync-champions
 
 # Load environment variables from .env file
 include .env
@@ -14,6 +14,7 @@ help:
 	@echo "  make dev-frontend  - Start React dev server"
 	@echo "  make db            - Start PostgreSQL database"
 	@echo "  make db-stop       - Stop PostgreSQL database"
+	@echo "  make db-clean      - Remove database volume (fresh start)"
 	@echo ""
 	@echo "Lobby Simulator:"
 	@echo "  make dev-lobby     - Create 10-player lobby ready for draft"
@@ -57,6 +58,12 @@ db:
 db-stop:
 	@echo "Stopping PostgreSQL..."
 	docker compose stop postgres
+
+db-clean:
+	@echo "Cleaning database..."
+	docker compose down postgres -v
+	docker volume rm league-draft-website_postgres_data 2>/dev/null || true
+	@echo "Database cleaned. Run 'make db' to start fresh."
 
 # Build
 build:

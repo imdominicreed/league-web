@@ -74,6 +74,8 @@ export function useWebSocket(roomId: string, side: string) {
           },
           players: payload.players,
           spectatorCount: payload.spectatorCount,
+          isCaptain: payload.isCaptain,
+          isTeamDraft: payload.isTeamDraft,
         }))
         break
       }

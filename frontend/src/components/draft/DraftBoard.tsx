@@ -16,13 +16,13 @@ interface Props {
 }
 
 export default function DraftBoard({ ws }: Props) {
-  const { room, players } = useSelector((state: RootState) => state.room)
+  const { room, players, isCaptain } = useSelector((state: RootState) => state.room)
   const draft = useSelector((state: RootState) => state.draft)
 
   if (!room) return null
 
   const isWaiting = room.status === 'waiting'
-  const isYourTurn = draft.yourSide === draft.currentTeam
+  const isYourTurn = isCaptain && draft.yourSide === draft.currentTeam
 
   return (
     <div className="h-screen flex flex-col bg-lol-dark overflow-hidden">
@@ -98,16 +98,25 @@ export default function DraftBoard({ ws }: Props) {
                 </div>
               </div>
 
-              {draft.yourSide !== 'spectator' && (
-                <button
-                  onClick={() => ws.setReady(true)}
-                  className="bg-lol-blue-accent text-lol-dark font-beaufort font-bold py-2 px-6 rounded text-sm uppercase tracking-wider hover:brightness-110 transition"
-                >
-                  Ready
-                </button>
-              )}
+              {isCaptain && (() => {
+                const myPlayer = draft.yourSide === 'blue' ? players.blue : players.red;
+                const isMyReady = myPlayer?.ready ?? false;
+                return isMyReady ? (
+                  <div className="bg-green-600 text-white font-beaufort font-bold py-2 px-6 rounded text-sm uppercase tracking-wider flex items-center gap-2">
+                    <span>Ready</span>
+                    <span className="text-lg">✓</span>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => ws.setReady(true)}
+                    className="bg-lol-blue-accent text-lol-dark font-beaufort font-bold py-2 px-6 rounded text-sm uppercase tracking-wider hover:brightness-110 transition"
+                  >
+                    Ready
+                  </button>
+                );
+              })()}
 
-              {players.blue?.ready && players.red?.ready && (
+              {isCaptain && players.blue?.ready && players.red?.ready && (
                 <button
                   onClick={() => ws.startDraft()}
                   className="mt-3 bg-lol-gold text-lol-dark font-beaufort font-bold py-2 px-6 rounded text-sm uppercase tracking-wider hover:brightness-110 transition"
