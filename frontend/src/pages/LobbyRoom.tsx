@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import { RootState, AppDispatch } from '@/store'
-import { fetchLobby, setReady, generateTeams, selectMatchOption, startDraft } from '@/store/slices/lobbySlice'
+import { fetchLobby, fetchMatchOptions, setReady, generateTeams, selectMatchOption, startDraft } from '@/store/slices/lobbySlice'
 import { LobbyPlayerGrid } from '@/components/lobby/LobbyPlayerGrid'
 import { MatchOptionCard } from '@/components/lobby/MatchOptionCard'
 
@@ -27,6 +27,13 @@ export default function LobbyRoom() {
       return () => clearInterval(interval)
     }
   }, [lobbyId, dispatch])
+
+  // Fetch match options when lobby is in matchmaking/team_selected status
+  useEffect(() => {
+    if (lobby && (lobby.status === 'matchmaking' || lobby.status === 'team_selected') && !matchOptions) {
+      dispatch(fetchMatchOptions(lobby.id))
+    }
+  }, [lobby, matchOptions, dispatch])
 
   useEffect(() => {
     if (lobby?.status === 'drafting' && lobby.roomId) {
