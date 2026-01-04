@@ -58,6 +58,7 @@ export function MatchOptionCard({ option, isSelected, onSelect, disabled }: Matc
 
   return (
     <div
+      data-testid={`match-option-${option.optionNumber}`}
       className={`bg-gray-800 rounded-lg p-4 border-2 transition-all ${
         isSelected
           ? 'border-lol-gold shadow-lg shadow-lol-gold/20'
