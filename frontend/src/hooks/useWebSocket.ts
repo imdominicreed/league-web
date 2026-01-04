@@ -7,7 +7,7 @@ import { WSMessage, StateSyncPayload } from '@/types'
 
 const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/v1/ws`
 
-export function useWebSocket(roomId: string) {
+export function useWebSocket(roomId: string, side: string) {
   const dispatch = useDispatch()
   const { accessToken } = useSelector((state: RootState) => state.auth)
   const wsRef = useRef<WebSocket | null>(null)
@@ -15,7 +15,7 @@ export function useWebSocket(roomId: string) {
   const [isConnected, setIsConnected] = useState(false)
 
   const connect = useCallback(() => {
-    if (!accessToken || !roomId) return
+    if (!accessToken || !roomId || !side) return
 
     dispatch(setConnectionStatus('connecting'))
 
@@ -26,10 +26,10 @@ export function useWebSocket(roomId: string) {
       setIsConnected(true)
       dispatch(setConnectionStatus('connected'))
 
-      // Join room
+      // Join room with assigned side
       ws.send(JSON.stringify({
         type: 'JOIN_ROOM',
-        payload: { roomId, side: 'spectator' },
+        payload: { roomId, side },
         timestamp: Date.now(),
       }))
     }
@@ -53,7 +53,7 @@ export function useWebSocket(roomId: string) {
       console.error('WebSocket connection error:', event)
       dispatch(setError('WebSocket connection error'))
     }
-  }, [accessToken, roomId, dispatch])
+  }, [accessToken, roomId, side, dispatch])
 
   const handleMessage = (message: WSMessage) => {
     switch (message.type) {

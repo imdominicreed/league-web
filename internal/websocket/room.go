@@ -1,12 +1,14 @@
 package websocket
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"sync"
 	"time"
 
 	"github.com/dom/league-draft-website/internal/domain"
+	"github.com/dom/league-draft-website/internal/repository"
 	"github.com/google/uuid"
 )
 
@@ -18,6 +20,7 @@ type Room struct {
 	redClient       *Client
 	spectators      map[*Client]bool
 	timerDurationMs int
+	userRepo        repository.UserRepository
 
 	// Draft state
 	draftState     *DraftState
@@ -66,13 +69,14 @@ type ReadyRequest struct {
 	Ready  bool
 }
 
-func NewRoom(id uuid.UUID, shortCode string, timerDurationMs int) *Room {
+func NewRoom(id uuid.UUID, shortCode string, timerDurationMs int, userRepo repository.UserRepository) *Room {
 	return &Room{
 		id:              id,
 		shortCode:       shortCode,
 		clients:         make(map[*Client]bool),
 		spectators:      make(map[*Client]bool),
 		timerDurationMs: timerDurationMs,
+		userRepo:        userRepo,
 		draftState: &DraftState{
 			CurrentPhase: 0,
 			BlueBans:     []string{},
@@ -91,6 +95,18 @@ func NewRoom(id uuid.UUID, shortCode string, timerDurationMs int) *Room {
 		startDraft:     make(chan *Client),
 		syncState:      make(chan *Client),
 	}
+}
+
+func (r *Room) getUserDisplayName(userID uuid.UUID) string {
+	user, err := r.userRepo.GetByID(context.Background(), userID)
+	if err != nil {
+		log.Printf("Failed to get user %s: %v", userID, err)
+		return "Unknown"
+	}
+	if user == nil {
+		return "Unknown"
+	}
+	return user.DisplayName
 }
 
 func (r *Room) Run() {
@@ -159,7 +175,7 @@ func (r *Room) handleJoin(client *Client) {
 	// Notify others
 	r.broadcastPlayerUpdate(client.side, &PlayerInfo{
 		UserID:      client.userID.String(),
-		DisplayName: "",
+		DisplayName: r.getUserDisplayName(client.userID),
 		Ready:       client.ready,
 	}, "joined")
 }
@@ -303,7 +319,7 @@ func (r *Room) handleReady(req *ReadyRequest) {
 
 	r.broadcastPlayerUpdate(req.Client.side, &PlayerInfo{
 		UserID:      req.Client.userID.String(),
-		DisplayName: "", // TODO: Get from user service
+		DisplayName: r.getUserDisplayName(req.Client.userID),
 		Ready:       req.Ready,
 	}, "ready_changed")
 }
@@ -533,14 +549,14 @@ func (r *Room) sendStateSyncLocked(client *Client) {
 	if r.blueClient != nil {
 		bluePlayer = &PlayerInfo{
 			UserID:      r.blueClient.userID.String(),
-			DisplayName: "",
+			DisplayName: r.getUserDisplayName(r.blueClient.userID),
 			Ready:       r.draftState.BlueReady,
 		}
 	}
 	if r.redClient != nil {
 		redPlayer = &PlayerInfo{
 			UserID:      r.redClient.userID.String(),
-			DisplayName: "",
+			DisplayName: r.getUserDisplayName(r.redClient.userID),
 			Ready:       r.draftState.RedReady,
 		}
 	}

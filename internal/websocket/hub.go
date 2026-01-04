@@ -4,6 +4,7 @@ import (
 	"log"
 	"sync"
 
+	"github.com/dom/league-draft-website/internal/repository"
 	"github.com/google/uuid"
 )
 
@@ -13,6 +14,7 @@ type Hub struct {
 	register   chan *Client
 	unregister chan *Client
 	joinRoom   chan *JoinRoomRequest
+	userRepo   repository.UserRepository
 	mu         sync.RWMutex
 }
 
@@ -22,13 +24,14 @@ type JoinRoomRequest struct {
 	Side   string
 }
 
-func NewHub() *Hub {
+func NewHub(userRepo repository.UserRepository) *Hub {
 	return &Hub{
 		rooms:      make(map[string]*Room),
 		clients:    make(map[*Client]bool),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 		joinRoom:   make(chan *JoinRoomRequest),
+		userRepo:   userRepo,
 	}
 }
 
@@ -82,7 +85,7 @@ func (h *Hub) CreateRoom(roomID uuid.UUID, shortCode string, timerDurationMs int
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	room := NewRoom(roomID, shortCode, timerDurationMs)
+	room := NewRoom(roomID, shortCode, timerDurationMs, h.userRepo)
 	h.rooms[roomID.String()] = room
 	h.rooms[shortCode] = room
 

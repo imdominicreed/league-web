@@ -162,11 +162,22 @@ func (h *RoomHandler) Join(w http.ResponseWriter, r *http.Request) {
 	}
 
 	side := domain.Side(req.Side)
-	if side != domain.SideBlue && side != domain.SideRed && side != domain.SideSpectator {
-		side = domain.SideSpectator
+
+	// Support auto-assignment
+	assignedSide := side
+	if req.Side == "auto" {
+		if room.BlueSideUserID == nil {
+			assignedSide = domain.SideBlue
+		} else if room.RedSideUserID == nil {
+			assignedSide = domain.SideRed
+		} else {
+			assignedSide = domain.SideSpectator
+		}
+	} else if side != domain.SideBlue && side != domain.SideRed && side != domain.SideSpectator {
+		assignedSide = domain.SideSpectator
 	}
 
-	room, err = h.roomService.JoinRoom(r.Context(), room.ID, userID, side)
+	room, err = h.roomService.JoinRoom(r.Context(), room.ID, userID, assignedSide)
 	if err != nil {
 		if errors.Is(err, service.ErrSideTaken) {
 			http.Error(w, "Side is already taken", http.StatusConflict)
@@ -184,7 +195,7 @@ func (h *RoomHandler) Join(w http.ResponseWriter, r *http.Request) {
 			TimerDurationSeconds: room.TimerDurationSeconds,
 			Status:               string(room.Status),
 		},
-		YourSide:     req.Side,
+		YourSide:     string(assignedSide),
 		WebsocketURL: "/api/v1/ws",
 	}
 

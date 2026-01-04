@@ -32,7 +32,7 @@ func main() {
 	repos := postgres.NewRepositories(db)
 
 	// Initialize WebSocket hub
-	hub := websocket.NewHub()
+	hub := websocket.NewHub(repos.User)
 	go hub.Run()
 
 	// Initialize services
