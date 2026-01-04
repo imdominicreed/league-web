@@ -358,3 +358,276 @@ func CreateAuthenticatedRequest(t *testing.T, method, url string, body interface
 
 	return req
 }
+
+// LobbyBuilder creates test lobbies with a builder pattern
+type LobbyBuilder struct {
+	creator      *domain.User
+	draftMode    domain.DraftMode
+	timerSeconds int
+	status       domain.LobbyStatus
+}
+
+// NewLobbyBuilder creates a new LobbyBuilder with default values
+func NewLobbyBuilder() *LobbyBuilder {
+	return &LobbyBuilder{
+		draftMode:    domain.DraftModeProPlay,
+		timerSeconds: 30,
+		status:       domain.LobbyStatusWaitingForPlayers,
+	}
+}
+
+// WithCreator sets the lobby creator
+func (b *LobbyBuilder) WithCreator(u *domain.User) *LobbyBuilder {
+	b.creator = u
+	return b
+}
+
+// WithDraftMode sets the draft mode
+func (b *LobbyBuilder) WithDraftMode(m domain.DraftMode) *LobbyBuilder {
+	b.draftMode = m
+	return b
+}
+
+// WithTimerDuration sets the timer duration in seconds
+func (b *LobbyBuilder) WithTimerDuration(s int) *LobbyBuilder {
+	b.timerSeconds = s
+	return b
+}
+
+// WithStatus sets the lobby status
+func (b *LobbyBuilder) WithStatus(s domain.LobbyStatus) *LobbyBuilder {
+	b.status = s
+	return b
+}
+
+// Build creates the lobby in the database
+func (b *LobbyBuilder) Build(t *testing.T, db *gorm.DB) *domain.Lobby {
+	t.Helper()
+
+	if b.creator == nil {
+		user, _ := NewUserBuilder().Build(t, db)
+		b.creator = user
+	}
+
+	lobby := &domain.Lobby{
+		ID:                   uuid.New(),
+		ShortCode:            generateShortCode(),
+		CreatedBy:            b.creator.ID,
+		Status:               b.status,
+		DraftMode:            b.draftMode,
+		TimerDurationSeconds: b.timerSeconds,
+		CreatedAt:            time.Now(),
+	}
+
+	if err := db.Create(lobby).Error; err != nil {
+		t.Fatalf("failed to create lobby: %v", err)
+	}
+
+	// Add creator as a lobby player
+	lobbyPlayer := &domain.LobbyPlayer{
+		ID:       uuid.New(),
+		LobbyID:  lobby.ID,
+		UserID:   b.creator.ID,
+		IsReady:  false,
+		JoinedAt: time.Now(),
+	}
+
+	if err := db.Create(lobbyPlayer).Error; err != nil {
+		t.Fatalf("failed to create lobby player: %v", err)
+	}
+
+	// Reload lobby with players
+	if err := db.Preload("Players").Preload("Players.User").First(lobby, "id = ?", lobby.ID).Error; err != nil {
+		t.Fatalf("failed to reload lobby: %v", err)
+	}
+
+	return lobby
+}
+
+// BuildWithPlayers creates the lobby with additional players
+func (b *LobbyBuilder) BuildWithPlayers(t *testing.T, db *gorm.DB, count int) (*domain.Lobby, []*domain.User) {
+	t.Helper()
+
+	lobby := b.Build(t, db)
+	users := make([]*domain.User, count)
+
+	// First user is the creator
+	if err := db.First(&users[0], "id = ?", b.creator.ID).Error; err != nil {
+		t.Fatalf("failed to load creator: %v", err)
+	}
+	users[0] = b.creator
+
+	// Create additional players (count-1 since creator is already included)
+	for i := 1; i < count; i++ {
+		user, _ := NewUserBuilder().Build(t, db)
+		users[i] = user
+
+		lobbyPlayer := &domain.LobbyPlayer{
+			ID:       uuid.New(),
+			LobbyID:  lobby.ID,
+			UserID:   user.ID,
+			IsReady:  false,
+			JoinedAt: time.Now(),
+		}
+
+		if err := db.Create(lobbyPlayer).Error; err != nil {
+			t.Fatalf("failed to create lobby player: %v", err)
+		}
+	}
+
+	// Reload lobby with all players
+	if err := db.Preload("Players").Preload("Players.User").First(lobby, "id = ?", lobby.ID).Error; err != nil {
+		t.Fatalf("failed to reload lobby: %v", err)
+	}
+
+	return lobby, users
+}
+
+// UserRoleProfileBuilder creates test user role profiles with a builder pattern
+type UserRoleProfileBuilder struct {
+	user          *domain.User
+	role          domain.Role
+	leagueRank    domain.LeagueRank
+	mmr           int
+	comfortRating int
+}
+
+// NewUserRoleProfileBuilder creates a new UserRoleProfileBuilder with default values
+func NewUserRoleProfileBuilder() *UserRoleProfileBuilder {
+	return &UserRoleProfileBuilder{
+		role:          domain.RoleMid,
+		leagueRank:    domain.RankGold4,
+		mmr:           1600,
+		comfortRating: 3,
+	}
+}
+
+// WithUser sets the user for the profile
+func (b *UserRoleProfileBuilder) WithUser(u *domain.User) *UserRoleProfileBuilder {
+	b.user = u
+	return b
+}
+
+// WithRole sets the role for the profile
+func (b *UserRoleProfileBuilder) WithRole(r domain.Role) *UserRoleProfileBuilder {
+	b.role = r
+	return b
+}
+
+// WithRank sets the league rank and updates MMR accordingly
+func (b *UserRoleProfileBuilder) WithRank(r domain.LeagueRank) *UserRoleProfileBuilder {
+	b.leagueRank = r
+	b.mmr = r.ToMMR()
+	return b
+}
+
+// WithMMR sets the MMR directly
+func (b *UserRoleProfileBuilder) WithMMR(m int) *UserRoleProfileBuilder {
+	b.mmr = m
+	return b
+}
+
+// WithComfortRating sets the comfort rating (1-5)
+func (b *UserRoleProfileBuilder) WithComfortRating(c int) *UserRoleProfileBuilder {
+	b.comfortRating = c
+	return b
+}
+
+// Build creates the user role profile in the database
+func (b *UserRoleProfileBuilder) Build(t *testing.T, db *gorm.DB) *domain.UserRoleProfile {
+	t.Helper()
+
+	if b.user == nil {
+		user, _ := NewUserBuilder().Build(t, db)
+		b.user = user
+	}
+
+	profile := &domain.UserRoleProfile{
+		ID:            uuid.New(),
+		UserID:        b.user.ID,
+		Role:          b.role,
+		LeagueRank:    b.leagueRank,
+		MMR:           b.mmr,
+		ComfortRating: b.comfortRating,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+
+	if err := db.Create(profile).Error; err != nil {
+		t.Fatalf("failed to create user role profile: %v", err)
+	}
+
+	return profile
+}
+
+// SeedLobbyWith10Players creates a lobby with 10 users each having role profiles
+func SeedLobbyWith10Players(t *testing.T, db *gorm.DB) (*domain.Lobby, []*domain.User) {
+	t.Helper()
+
+	lobby, users := NewLobbyBuilder().BuildWithPlayers(t, db, 10)
+
+	// Create role profiles for all users
+	comfortRatings := []int{5, 4, 3, 2, 1} // Primary role to least preferred
+	for _, user := range users {
+		for i, role := range domain.AllRoles {
+			NewUserRoleProfileBuilder().
+				WithUser(user).
+				WithRole(role).
+				WithRank(domain.RankGold4).
+				WithComfortRating(comfortRatings[i]).
+				Build(t, db)
+		}
+	}
+
+	return lobby, users
+}
+
+// SeedLobbyWith10ReadyPlayers creates a lobby with 10 ready players
+func SeedLobbyWith10ReadyPlayers(t *testing.T, db *gorm.DB) (*domain.Lobby, []*domain.User) {
+	t.Helper()
+
+	lobby, users := SeedLobbyWith10Players(t, db)
+
+	// Set all players to ready
+	if err := db.Model(&domain.LobbyPlayer{}).
+		Where("lobby_id = ?", lobby.ID).
+		Update("is_ready", true).Error; err != nil {
+		t.Fatalf("failed to update lobby players to ready: %v", err)
+	}
+
+	// Reload lobby with updated players
+	if err := db.Preload("Players").Preload("Players.User").First(lobby, "id = ?", lobby.ID).Error; err != nil {
+		t.Fatalf("failed to reload lobby: %v", err)
+	}
+
+	return lobby, users
+}
+
+// CreateUserWithAllRoleProfiles creates a user with profiles for all 5 roles
+func CreateUserWithAllRoleProfiles(t *testing.T, db *gorm.DB, baseMMR int) *domain.User {
+	t.Helper()
+
+	user, _ := NewUserBuilder().Build(t, db)
+
+	// Create a profile for each role with varying comfort ratings
+	comfortRatings := []int{5, 4, 3, 2, 1} // Primary role to least preferred
+
+	for i, role := range domain.AllRoles {
+		profile := &domain.UserRoleProfile{
+			ID:            uuid.New(),
+			UserID:        user.ID,
+			Role:          role,
+			LeagueRank:    domain.MMRToRank(baseMMR),
+			MMR:           baseMMR,
+			ComfortRating: comfortRatings[i],
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
+		}
+
+		if err := db.Create(profile).Error; err != nil {
+			t.Fatalf("failed to create user role profile: %v", err)
+		}
+	}
+
+	return user
+}

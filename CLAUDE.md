@@ -171,157 +171,53 @@ Optional:
 ### Running Tests
 
 ```bash
-# Run all tests (requires Docker for testcontainers)
-go test ./...
+# Backend (requires Docker for testcontainers)
+go test ./...                          # All tests
+go test ./... -v                       # Verbose
+go test ./... -race                    # Race detection
+go test ./... -short                   # Skip slow tests
 
-# Run with verbose output
-go test ./... -v
-
-# Run specific package
-go test ./internal/api/handlers/...
-go test ./internal/service/...
-go test ./internal/repository/postgres/...
-go test ./internal/websocket/...
-
-# Run with race detection
-go test ./... -race
-
-# Run with coverage
-go test ./... -coverprofile=coverage.out
-go tool cover -html=coverage.out
-
-# Skip slow tests (full draft flow)
-go test ./... -short
-
-# Frontend linting
-cd frontend && npm run lint
+# Frontend E2E (requires backend running)
+cd frontend && npx playwright test     # All E2E tests
+cd frontend && npx playwright test --ui # Interactive mode
 ```
 
-### Test Infrastructure
+### Backend Test Framework (`internal/testutil/`)
 
-Tests use **testcontainers-go** for real PostgreSQL instances. Docker must be running.
+Uses **testcontainers-go** for real PostgreSQL instances. Docker must be running.
 
-**Key test utilities** in `internal/testutil/`:
+| Component | Purpose |
+|-----------|---------|
+| `NewTestDB(t)` | Creates PostgreSQL container with migrations |
+| `NewTestServer(t)` | Full HTTP server with hub, services, repos |
+| `TestConfig()` | Returns test-appropriate config (fast timers, etc.) |
 
-| File | Purpose |
-|------|---------|
-| `testutil.go` | `TestDB` (PostgreSQL container), `TestServer` (full HTTP server) |
-| `fixtures.go` | `UserBuilder`, `RoomBuilder`, `ChampionBuilder` for test data |
-| `assertions.go` | Custom assertions like `AssertStatusCode`, `AssertJSONResponse` |
-| `ws_client.go` | WebSocket test client for draft flow testing |
+**Builders** (fluent API for test data):
 
-### Writing New Tests
-
-**1. Repository Tests** (`internal/repository/postgres/*_test.go`):
-```go
-func TestMyRepo_Method(t *testing.T) {
-    testDB := testutil.NewTestDB(t)  // Creates PostgreSQL container
-    repo := postgres.NewMyRepository(testDB.DB)
-    ctx := context.Background()
-
-    // Create test data using builders
-    user, _ := testutil.NewUserBuilder().
-        WithDisplayName("testuser").
-        Build(t, testDB.DB)
-
-    // Test the method
-    result, err := repo.SomeMethod(ctx, user.ID)
-    require.NoError(t, err)
-    assert.Equal(t, expected, result)
-}
-```
-
-**2. Service Tests** (`internal/service/*_test.go`):
-```go
-func TestMyService_Method(t *testing.T) {
-    testDB := testutil.NewTestDB(t)
-    repos := postgres.NewRepositories(testDB.DB)
-    cfg := testutil.TestConfig()
-    svc := service.NewMyService(repos.X, cfg)
-
-    tests := []struct {
-        name    string
-        input   SomeInput
-        wantErr error
-    }{
-        {name: "success", input: validInput},
-        {name: "error case", input: badInput, wantErr: service.ErrSomething},
-    }
-
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            result, err := svc.Method(ctx, tt.input)
-            if tt.wantErr != nil {
-                assert.ErrorIs(t, err, tt.wantErr)
-                return
-            }
-            require.NoError(t, err)
-            // assertions...
-        })
-    }
-}
-```
-
-**3. Handler Tests** (`internal/api/handlers/*_test.go`):
-```go
-func TestMyHandler_Endpoint(t *testing.T) {
-    ts := testutil.NewTestServer(t)  // Full HTTP server with all dependencies
-
-    // Authenticate a user
-    _, token := testutil.NewUserBuilder().
-        WithDisplayName("testuser").
-        BuildAndAuthenticate(t, ts)
-
-    // Make authenticated request
-    req := testutil.CreateAuthenticatedRequest(t, "POST", ts.APIURL("/path"), body, token)
-    client := &http.Client{}
-    resp, err := client.Do(req)
-    require.NoError(t, err)
-
-    assert.Equal(t, http.StatusOK, resp.StatusCode)
-}
-```
-
-**4. WebSocket Tests** (`internal/websocket/*_test.go`):
-```go
-func TestDraft_Scenario(t *testing.T) {
-    ts := testutil.NewTestServer(t)
-
-    _, blueToken := testutil.NewUserBuilder().BuildAndAuthenticate(t, ts)
-    _, redToken := testutil.NewUserBuilder().BuildAndAuthenticate(t, ts)
-
-    room := testutil.NewRoomBuilder().BuildWithHub(t, ts)
-    testutil.SeedRealChampions(t, ts.DB.DB)
-
-    blueClient := testutil.NewWSClient(t, ts.WebSocketURL(blueToken))
-    redClient := testutil.NewWSClient(t, ts.WebSocketURL(redToken))
-
-    blueClient.JoinRoom(room.ID.String(), "blue")
-    blueClient.ExpectStateSync(5 * time.Second)
-
-    redClient.JoinRoom(room.ID.String(), "red")
-    redClient.ExpectStateSync(5 * time.Second)
-
-    // Ready up and start draft
-    blueClient.Ready(true)
-    redClient.Ready(true)
-    time.Sleep(100 * time.Millisecond)
-    blueClient.DrainMessages()
-    redClient.DrainMessages()
-
-    blueClient.StartDraft()
-    // Test draft actions...
-}
-```
-
-### Test Coverage Goals
-
-| Package | Focus Areas |
+| Builder | Key Methods |
 |---------|-------------|
-| `repository/postgres` | CRUD operations, edge cases |
-| `service` | Business logic, validation, error cases |
-| `api/handlers` | HTTP status codes, auth, request validation |
-| `websocket` | Draft state machine, phase transitions, error handling |
+| `NewUserBuilder()` | `WithDisplayName()`, `Build()`, `BuildAndAuthenticate()` |
+| `NewRoomBuilder()` | `WithCreator()`, `WithDraftMode()`, `Build()`, `BuildWithHub()` |
+| `NewChampionBuilder()` | `WithID()`, `WithName()`, `WithTags()`, `Build()` |
+| `NewLobbyBuilder()` | `WithCreator()`, `WithStatus()`, `Build()`, `BuildWithPlayers()` |
+| `NewUserRoleProfileBuilder()` | `WithUser()`, `WithRole()`, `WithRank()`, `Build()` |
+
+**Seeding helpers**: `SeedChampions()`, `SeedRealChampions()`, `SeedLobbyWith10Players()`, `SeedLobbyWith10ReadyPlayers()`
+
+**WebSocket client** (`WSClient`): `JoinRoom()`, `Ready()`, `StartDraft()`, `SelectChampion()`, `LockIn()`, `ExpectStateSync()`, `ExpectPhaseChanged()`, `ExpectError()`
+
+**Assertions**: `AssertStatusCode()`, `AssertJSONResponse()`, `AssertErrorResponse()`, `AssertContainsChampion()`
+
+### Frontend E2E Framework (`frontend/e2e/`)
+
+Uses **Playwright** with page objects and multi-user fixtures.
+
+| Fixture | Purpose |
+|---------|---------|
+| `pages.ts` | Page objects: `HomePage`, `LoginPage`, `RegisterPage`, `CreateLobbyPage`, `LobbyRoomPage` |
+| `multi-user.ts` | `createUsers(n)` creates N authenticated browser contexts, `lobbyWithUsers(n)` creates lobby with N users |
+
+**API helpers**: `registerUserViaApi()`, `createLobbyViaApi()`, `joinLobbyViaApi()`, `setReadyViaApi()`, `generateTeams()`, `selectMatchOption()`
 
 ## Recent Improvements
 
@@ -329,6 +225,20 @@ func TestDraft_Scenario(t *testing.T) {
 - **WebSocket Error Logging**: Connection errors and message handling logged for debugging
 - **Auth Error Logging**: Authentication middleware logs all auth failures
 - **WSL Compatibility**: Backend port updated to 9999 for WSL environment
+
+## Commit Convention
+
+Use [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>(<scope>): <description>
+
+[optional body]
+```
+
+**Types**: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
+
+**Scopes**: `backend`, `frontend`, `ws`, `api`, `lobby`, `draft`, `auth`, `e2e`
 
 ## Notes
 
