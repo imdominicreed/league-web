@@ -15,9 +15,14 @@ help:
 	@echo "  make db            - Start PostgreSQL database"
 	@echo "  make db-stop       - Stop PostgreSQL database"
 	@echo ""
+	@echo "Lobby Simulator:"
+	@echo "  make dev-lobby     - Create 10-player lobby ready for draft"
+	@echo "  make dev-lobby-populate LOBBY=<code> - Add players to existing lobby"
+	@echo ""
 	@echo "Build:"
 	@echo "  make build         - Build Go backend"
 	@echo "  make build-frontend- Build React frontend"
+	@echo "  make simulator-build - Build lobby simulator CLI"
 	@echo ""
 	@echo "Docker:"
 	@echo "  make docker-up     - Start all services with Docker Compose"
@@ -100,3 +105,18 @@ install:
 	go mod download
 	@echo "Installing frontend dependencies..."
 	cd frontend && npm install
+
+# Simulator commands
+simulator-build:
+	@echo "Building lobby simulator..."
+	go build -o bin/simulator ./cmd/simulator
+
+# Quick lobby population for development - creates 10-player lobby ready for draft
+dev-lobby: simulator-build
+	@echo "Creating 10-player lobby..."
+	./bin/simulator full
+
+# Populate existing lobby with fake users
+dev-lobby-populate: simulator-build
+	@echo "Usage: make dev-lobby-populate LOBBY=<code> COUNT=9"
+	./bin/simulator populate --lobby=$(LOBBY) --count=$(COUNT)
