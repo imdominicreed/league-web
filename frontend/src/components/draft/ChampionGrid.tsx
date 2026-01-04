@@ -1,7 +1,6 @@
 import { useState, useMemo } from 'react'
 import { useSelector } from 'react-redux'
 import { RootState } from '@/store'
-import { Champion } from '@/types'
 
 interface Props {
   onSelect: (championId: string) => void
@@ -13,16 +12,10 @@ interface Props {
 
 const ROLES = ['Fighter', 'Tank', 'Mage', 'Assassin', 'Marksman', 'Support']
 
-// Get splash art URL for the center preview
-function getSplashUrl(champion: Champion): string {
-  return `https://ddragon.leagueoflegends.com/cdn/img/champion/splash/${champion.id}_0.jpg`
-}
-
 export default function ChampionGrid({ onSelect, onLockIn, onHover, isYourTurn, disabled }: Props) {
-  const { championsList, champions } = useSelector((state: RootState) => state.champions)
+  const { championsList } = useSelector((state: RootState) => state.champions)
   const draft = useSelector((state: RootState) => state.draft)
   const [selectedChampion, setSelectedChampion] = useState<string | null>(null)
-  const [hoveredChampion, setHoveredChampion] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedRoles, setSelectedRoles] = useState<string[]>([])
 
@@ -58,13 +51,11 @@ export default function ChampionGrid({ onSelect, onLockIn, onHover, isYourTurn, 
 
   const handleMouseEnter = (championId: string) => {
     if (isYourTurn && !usedChampions.has(championId)) {
-      setHoveredChampion(championId)
       onHover(championId)
     }
   }
 
   const handleMouseLeave = () => {
-    setHoveredChampion(null)
     if (!selectedChampion) {
       onHover(null)
     }
@@ -74,7 +65,6 @@ export default function ChampionGrid({ onSelect, onLockIn, onHover, isYourTurn, 
     if (selectedChampion) {
       onLockIn()
       setSelectedChampion(null)
-      setHoveredChampion(null)
     }
   }
 

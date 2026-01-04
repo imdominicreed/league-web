@@ -22,6 +22,12 @@ type Room struct {
 	timerDurationMs int
 	userRepo        repository.UserRepository
 
+	// Team draft mode (5v5)
+	isTeamDraft   bool
+	roomPlayers   map[uuid.UUID]*domain.RoomPlayer // userId -> RoomPlayer
+	blueCaptainID *uuid.UUID
+	redCaptainID  *uuid.UUID
+
 	// Draft state
 	draftState     *DraftState
 	currentHover   map[string]*string // side -> championId
@@ -95,6 +101,62 @@ func NewRoom(id uuid.UUID, shortCode string, timerDurationMs int, userRepo repos
 		startDraft:     make(chan *Client),
 		syncState:      make(chan *Client),
 	}
+}
+
+// InitializeTeamDraft sets up the room for 5v5 team draft mode
+func (r *Room) InitializeTeamDraft(players []*domain.RoomPlayer) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.isTeamDraft = true
+	r.roomPlayers = make(map[uuid.UUID]*domain.RoomPlayer)
+	for _, p := range players {
+		r.roomPlayers[p.UserID] = p
+		if p.IsCaptain {
+			if p.Team == domain.SideBlue {
+				r.blueCaptainID = &p.UserID
+			} else if p.Team == domain.SideRed {
+				r.redCaptainID = &p.UserID
+			}
+		}
+	}
+}
+
+// IsTeamDraft returns whether the room is in team draft mode
+func (r *Room) IsTeamDraft() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.isTeamDraft
+}
+
+// canAct checks if a user can perform pick/ban actions for the given side
+func (r *Room) canAct(userID uuid.UUID, side string) bool {
+	if r.isTeamDraft {
+		// In team draft, only captains can act
+		if side == "blue" && r.blueCaptainID != nil {
+			return userID == *r.blueCaptainID
+		}
+		if side == "red" && r.redCaptainID != nil {
+			return userID == *r.redCaptainID
+		}
+		return false
+	}
+	// Original 1v1 logic: check if client is the side's assigned client
+	return true
+}
+
+// GetPlayerTeam returns the team for a player in team draft mode
+func (r *Room) GetPlayerTeam(userID uuid.UUID) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if !r.isTeamDraft {
+		return ""
+	}
+	if player, ok := r.roomPlayers[userID]; ok {
+		return string(player.Team)
+	}
+	return ""
 }
 
 func (r *Room) getUserDisplayName(userID uuid.UUID) string {
@@ -213,11 +275,22 @@ func (r *Room) handleSelectChampion(req *SelectChampionRequest) {
 		return
 	}
 
+	currentSide := string(phase.Team)
+
 	// Check if it's this client's turn
-	if (phase.Team == domain.SideBlue && req.Client != r.blueClient) ||
-		(phase.Team == domain.SideRed && req.Client != r.redClient) {
-		req.Client.sendError("NOT_YOUR_TURN", "It's not your turn")
-		return
+	if r.isTeamDraft {
+		// In team draft mode, use canAct to check if user is captain
+		if !r.canAct(req.Client.userID, currentSide) {
+			req.Client.sendError("NOT_YOUR_TURN", "Only the captain can pick/ban")
+			return
+		}
+	} else {
+		// Original 1v1 logic
+		if (phase.Team == domain.SideBlue && req.Client != r.blueClient) ||
+			(phase.Team == domain.SideRed && req.Client != r.redClient) {
+			req.Client.sendError("NOT_YOUR_TURN", "It's not your turn")
+			return
+		}
 	}
 
 	// Check if champion is already picked/banned
@@ -227,11 +300,11 @@ func (r *Room) handleSelectChampion(req *SelectChampionRequest) {
 	}
 
 	// Store selection (will be confirmed on lock in)
-	r.currentHover[string(phase.Team)] = &req.ChampionID
+	r.currentHover[currentSide] = &req.ChampionID
 
 	// Broadcast hover
 	msg, _ := NewMessage(MessageTypeChampionHovered, ChampionHoveredPayload{
-		Side:       string(phase.Team),
+		Side:       currentSide,
 		ChampionID: &req.ChampionID,
 	})
 	r.broadcastMessageLocked(msg)
@@ -251,14 +324,25 @@ func (r *Room) handleLockIn(client *Client) {
 		return
 	}
 
+	currentSide := string(phase.Team)
+
 	// Check if it's this client's turn
-	if (phase.Team == domain.SideBlue && client != r.blueClient) ||
-		(phase.Team == domain.SideRed && client != r.redClient) {
-		client.sendError("NOT_YOUR_TURN", "It's not your turn")
-		return
+	if r.isTeamDraft {
+		// In team draft mode, use canAct to check if user is captain
+		if !r.canAct(client.userID, currentSide) {
+			client.sendError("NOT_YOUR_TURN", "Only the captain can pick/ban")
+			return
+		}
+	} else {
+		// Original 1v1 logic
+		if (phase.Team == domain.SideBlue && client != r.blueClient) ||
+			(phase.Team == domain.SideRed && client != r.redClient) {
+			client.sendError("NOT_YOUR_TURN", "It's not your turn")
+			return
+		}
 	}
 
-	championID := r.currentHover[string(phase.Team)]
+	championID := r.currentHover[currentSide]
 	if championID == nil {
 		client.sendError("NO_SELECTION", "No champion selected")
 		return

@@ -7,6 +7,9 @@ import Register from './pages/Register'
 import CreateDraft from './pages/CreateDraft'
 import JoinDraft from './pages/JoinDraft'
 import DraftRoom from './pages/DraftRoom'
+import Profile from './pages/Profile'
+import CreateLobby from './pages/CreateLobby'
+import LobbyRoom from './pages/LobbyRoom'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useSelector((state: RootState) => state.auth)
@@ -54,6 +57,30 @@ function App() {
           element={
             <ProtectedRoute>
               <DraftRoom />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/profile"
+          element={
+            <ProtectedRoute>
+              <Profile />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/create-lobby"
+          element={
+            <ProtectedRoute>
+              <CreateLobby />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/lobby/:lobbyId"
+          element={
+            <ProtectedRoute>
+              <LobbyRoom />
             </ProtectedRoute>
           }
         />

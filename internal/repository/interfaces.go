@@ -52,12 +52,65 @@ type FearlessBanRepository interface {
 	GetBySeriesID(ctx context.Context, seriesID uuid.UUID) ([]*domain.FearlessBan, error)
 }
 
+type UserRoleProfileRepository interface {
+	Create(ctx context.Context, profile *domain.UserRoleProfile) error
+	CreateMany(ctx context.Context, profiles []*domain.UserRoleProfile) error
+	GetByUserID(ctx context.Context, userID uuid.UUID) ([]*domain.UserRoleProfile, error)
+	GetByUserIDAndRole(ctx context.Context, userID uuid.UUID, role domain.Role) (*domain.UserRoleProfile, error)
+	Upsert(ctx context.Context, profile *domain.UserRoleProfile) error
+	Update(ctx context.Context, profile *domain.UserRoleProfile) error
+	GetByUserIDs(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID][]*domain.UserRoleProfile, error)
+}
+
+type LobbyRepository interface {
+	Create(ctx context.Context, lobby *domain.Lobby) error
+	GetByID(ctx context.Context, id uuid.UUID) (*domain.Lobby, error)
+	GetByShortCode(ctx context.Context, code string) (*domain.Lobby, error)
+	Update(ctx context.Context, lobby *domain.Lobby) error
+	GetByUserID(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.Lobby, error)
+	Delete(ctx context.Context, id uuid.UUID) error
+}
+
+type LobbyPlayerRepository interface {
+	Create(ctx context.Context, player *domain.LobbyPlayer) error
+	GetByLobbyID(ctx context.Context, lobbyID uuid.UUID) ([]*domain.LobbyPlayer, error)
+	GetByLobbyIDAndUserID(ctx context.Context, lobbyID, userID uuid.UUID) (*domain.LobbyPlayer, error)
+	Update(ctx context.Context, player *domain.LobbyPlayer) error
+	Delete(ctx context.Context, lobbyID, userID uuid.UUID) error
+	CountByLobbyID(ctx context.Context, lobbyID uuid.UUID) (int64, error)
+	UpdateTeamAssignments(ctx context.Context, lobbyID uuid.UUID, assignments map[uuid.UUID]struct {
+		Team domain.Side
+		Role domain.Role
+	}) error
+}
+
+type MatchOptionRepository interface {
+	Create(ctx context.Context, option *domain.MatchOption) error
+	CreateMany(ctx context.Context, options []*domain.MatchOption) error
+	GetByLobbyID(ctx context.Context, lobbyID uuid.UUID) ([]*domain.MatchOption, error)
+	GetByLobbyIDAndNumber(ctx context.Context, lobbyID uuid.UUID, optionNumber int) (*domain.MatchOption, error)
+	DeleteByLobbyID(ctx context.Context, lobbyID uuid.UUID) error
+}
+
+type RoomPlayerRepository interface {
+	Create(ctx context.Context, player *domain.RoomPlayer) error
+	CreateMany(ctx context.Context, players []*domain.RoomPlayer) error
+	GetByRoomID(ctx context.Context, roomId uuid.UUID) ([]*domain.RoomPlayer, error)
+	GetByRoomAndUser(ctx context.Context, roomId, userId uuid.UUID) (*domain.RoomPlayer, error)
+	GetCaptains(ctx context.Context, roomId uuid.UUID) (map[string]*domain.RoomPlayer, error)
+}
+
 type Repositories struct {
-	User        UserRepository
-	Session     SessionRepository
-	Room        RoomRepository
-	DraftState  DraftStateRepository
-	DraftAction DraftActionRepository
-	Champion    ChampionRepository
-	FearlessBan FearlessBanRepository
+	User            UserRepository
+	Session         SessionRepository
+	Room            RoomRepository
+	DraftState      DraftStateRepository
+	DraftAction     DraftActionRepository
+	Champion        ChampionRepository
+	FearlessBan     FearlessBanRepository
+	UserRoleProfile UserRoleProfileRepository
+	Lobby           LobbyRepository
+	LobbyPlayer     LobbyPlayerRepository
+	MatchOption     MatchOptionRepository
+	RoomPlayer      RoomPlayerRepository
 }

@@ -30,6 +30,18 @@ export default function Home() {
             >
               Join Room
             </Link>
+            <Link
+              to="/profile"
+              className="bg-gray-700 text-white font-semibold py-3 px-6 rounded-lg text-center hover:bg-gray-600 transition"
+            >
+              My Profile
+            </Link>
+            <Link
+              to="/create-lobby"
+              className="bg-purple-600 text-white font-semibold py-3 px-6 rounded-lg text-center hover:bg-purple-700 transition"
+            >
+              Create 10-Man Lobby
+            </Link>
           </>
         ) : (
           <>

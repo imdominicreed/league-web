@@ -1,5 +1,5 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit'
-import { DraftState } from '@/types'
+import { DraftState, TeamPlayer } from '@/types'
 
 interface DraftSliceState extends DraftState {
   hoveredChampion: {
@@ -8,6 +8,8 @@ interface DraftSliceState extends DraftState {
   }
   yourSide: 'blue' | 'red' | 'spectator' | null
   fearlessBans: string[]
+  teamPlayers: TeamPlayer[]
+  isTeamDraft: boolean
 }
 
 const initialState: DraftSliceState = {
@@ -26,13 +28,15 @@ const initialState: DraftSliceState = {
   },
   yourSide: null,
   fearlessBans: [],
+  teamPlayers: [],
+  isTeamDraft: false,
 }
 
 const draftSlice = createSlice({
   name: 'draft',
   initialState,
   reducers: {
-    syncState: (state, action: PayloadAction<DraftState & { yourSide: string; fearlessBans?: string[] }>) => {
+    syncState: (state, action: PayloadAction<DraftState & { yourSide: string; fearlessBans?: string[]; teamPlayers?: TeamPlayer[]; isTeamDraft?: boolean }>) => {
       state.currentPhase = action.payload.currentPhase
       state.currentTeam = action.payload.currentTeam
       state.actionType = action.payload.actionType
@@ -44,6 +48,8 @@ const draftSlice = createSlice({
       state.isComplete = action.payload.isComplete
       state.yourSide = action.payload.yourSide as 'blue' | 'red' | 'spectator'
       state.fearlessBans = action.payload.fearlessBans || []
+      state.teamPlayers = action.payload.teamPlayers || []
+      state.isTeamDraft = action.payload.isTeamDraft || false
     },
     championSelected: (state, action: PayloadAction<{ phase: number; team: string; actionType: string; championId: string }>) => {
       const { team, actionType, championId } = action.payload

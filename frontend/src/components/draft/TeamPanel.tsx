@@ -1,6 +1,6 @@
 import { useSelector } from 'react-redux'
 import { RootState } from '@/store'
-import { Player, Champion } from '@/types'
+import { Player, Champion, TeamPlayer, Role, ALL_ROLES, ROLE_ABBREVIATIONS } from '@/types'
 
 interface Props {
   side: 'blue' | 'red'
@@ -15,6 +15,15 @@ function getSplashUrl(champion: Champion): string {
   return `https://ddragon.leagueoflegends.com/cdn/img/champion/loading/${champion.id}_0.jpg`
 }
 
+// Role order for pick slots: top=0, jungle=1, mid=2, adc=3, support=4
+const ROLE_TO_SLOT_INDEX: Record<Role, number> = {
+  top: 0,
+  jungle: 1,
+  mid: 2,
+  adc: 3,
+  support: 4,
+}
+
 export default function TeamPanel({ side, player, picks, isActive, hoveredChampion }: Props) {
   const { champions } = useSelector((state: RootState) => state.champions)
   const draft = useSelector((state: RootState) => state.draft)
@@ -24,6 +33,101 @@ export default function TeamPanel({ side, player, picks, isActive, hoveredChampi
 
   // For current pick, show hovered champion
   const currentActionChampion = isActive && hoveredChampion ? hoveredChampion : null
+
+  // Filter team players for this side
+  const teamPlayers = draft.teamPlayers.filter((p: TeamPlayer) => p.team === side)
+  const isTeamDraft = draft.isTeamDraft && teamPlayers.length > 0
+
+  // Get captain for this team
+  const captain = teamPlayers.find((p: TeamPlayer) => p.isCaptain)
+
+  // Create a map of role to player for team draft mode
+  const playersByRole: Record<Role, TeamPlayer | undefined> = {} as Record<Role, TeamPlayer | undefined>
+  teamPlayers.forEach((p: TeamPlayer) => {
+    playersByRole[p.assignedRole] = p
+  })
+
+  // Render a single pick slot
+  const renderPickSlot = (
+    slotIndex: number,
+    championId: string | undefined,
+    role?: Role,
+    teamPlayer?: TeamPlayer
+  ) => {
+    const champion = championId ? champions[championId] : null
+    const isCurrentPick = draft.actionType === 'pick' && isActive && slotIndex === picks.length
+    const showHovered = isCurrentPick && currentActionChampion && champions[currentActionChampion]
+
+    // In team draft mode, highlight captain's row when it's their team's turn
+    const isCaptainRow = isTeamDraft && teamPlayer?.isCaptain && isActive
+
+    return (
+      <div
+        key={slotIndex}
+        className={`flex-1 relative overflow-hidden border-b border-lol-border last:border-b-0 ${
+          isCurrentPick ? 'ring-2 ring-inset ring-lol-gold animate-pulse' : ''
+        } ${isCaptainRow ? 'ring-1 ring-inset ring-lol-gold/50' : ''}`}
+      >
+        {/* Role and Player Info overlay for team draft */}
+        {isTeamDraft && role && (
+          <div className="absolute top-0 left-0 right-0 z-10 flex items-center gap-1 px-1.5 py-0.5 bg-black/60">
+            <span className={`text-xs font-bold ${side === 'blue' ? 'text-blue-team' : 'text-red-team'}`}>
+              {ROLE_ABBREVIATIONS[role]}
+            </span>
+            {teamPlayer && (
+              <>
+                <span className="text-lol-text-secondary text-xs truncate flex-1">
+                  {teamPlayer.displayName}
+                </span>
+                {teamPlayer.isCaptain && (
+                  <span className="text-lol-gold text-xs font-bold" title="Captain">
+                    C
+                  </span>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {champion ? (
+          // Picked champion - show splash art
+          <>
+            <img
+              src={getSplashUrl(champion)}
+              alt={champion.name}
+              className="absolute inset-0 w-full h-full object-cover object-top"
+            />
+            {/* Gradient overlay for text readability */}
+            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+            {/* Champion name */}
+            <div className="absolute bottom-0 left-0 right-0 p-1">
+              <div className="text-lol-gold text-sm font-beaufort uppercase tracking-wider font-semibold truncate">
+                {champion.name}
+              </div>
+            </div>
+          </>
+        ) : showHovered ? (
+          // Currently hovering - show preview
+          <>
+            <img
+              src={getSplashUrl(champions[currentActionChampion])}
+              alt="Selecting..."
+              className="absolute inset-0 w-full h-full object-cover object-top opacity-60"
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+            <div className="absolute bottom-0 left-0 right-0 p-1">
+              <div className="text-lol-gold text-sm font-beaufort uppercase tracking-wider font-semibold truncate">
+                {champions[currentActionChampion].name}
+              </div>
+            </div>
+          </>
+        ) : (
+          // Empty slot
+          <div className="absolute inset-0 bg-lol-gray/30" />
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className={`w-56 bg-lol-dark-blue flex flex-col border-l border-r border-lol-border pb-4 ${
@@ -35,64 +139,31 @@ export default function TeamPanel({ side, player, picks, isActive, hoveredChampi
           {side === 'blue' ? 'Blue' : 'Red'}
         </div>
         <div className="text-lol-gold-light text-xs truncate">
-          {player?.displayName || 'Waiting...'}
+          {isTeamDraft ? (
+            captain ? `${captain.displayName} (Captain)` : 'Team'
+          ) : (
+            player?.displayName || 'Waiting...'
+          )}
         </div>
       </div>
 
       {/* Picks - Large Splash Art Slots */}
       <div className="flex-1 flex flex-col">
-        {[0, 1, 2, 3, 4].map((i) => {
-          const championId = picks[i]
-          const champion = championId ? champions[championId] : null
-          const isCurrentPick = draft.actionType === 'pick' && isActive && i === picks.length
-          const showHovered = isCurrentPick && currentActionChampion && champions[currentActionChampion]
-
-          return (
-            <div
-              key={i}
-              className={`flex-1 relative overflow-hidden border-b border-lol-border last:border-b-0 ${
-                isCurrentPick ? 'ring-2 ring-inset ring-lol-gold animate-pulse' : ''
-              }`}
-            >
-              {champion ? (
-                // Picked champion - show splash art
-                <>
-                  <img
-                    src={getSplashUrl(champion)}
-                    alt={champion.name}
-                    className="absolute inset-0 w-full h-full object-cover object-top"
-                  />
-                  {/* Gradient overlay for text readability */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
-                  {/* Champion name */}
-                  <div className="absolute bottom-0 left-0 right-0 p-1">
-                    <div className="text-lol-gold text-sm font-beaufort uppercase tracking-wider font-semibold truncate">
-                      {champion.name}
-                    </div>
-                  </div>
-                </>
-              ) : showHovered ? (
-                // Currently hovering - show preview
-                <>
-                  <img
-                    src={getSplashUrl(champions[currentActionChampion])}
-                    alt="Selecting..."
-                    className="absolute inset-0 w-full h-full object-cover object-top opacity-60"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
-                  <div className="absolute bottom-0 left-0 right-0 p-1">
-                    <div className="text-lol-gold text-sm font-beaufort uppercase tracking-wider font-semibold truncate">
-                      {champions[currentActionChampion].name}
-                    </div>
-                  </div>
-                </>
-              ) : (
-                // Empty slot
-                <div className="absolute inset-0 bg-lol-gray/30" />
-              )}
-            </div>
-          )
-        })}
+        {isTeamDraft ? (
+          // Team draft mode: Show 5 rows with roles
+          ALL_ROLES.map((role) => {
+            const slotIndex = ROLE_TO_SLOT_INDEX[role]
+            const championId = picks[slotIndex]
+            const teamPlayer = playersByRole[role]
+            return renderPickSlot(slotIndex, championId, role, teamPlayer)
+          })
+        ) : (
+          // Original 1v1 mode: Show 5 pick slots without roles
+          [0, 1, 2, 3, 4].map((i) => {
+            const championId = picks[i]
+            return renderPickSlot(i, championId)
+          })
+        )}
       </div>
     </div>
   )

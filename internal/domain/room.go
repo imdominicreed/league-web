@@ -32,14 +32,17 @@ type Room struct {
 	RedSideUserID        *uuid.UUID `json:"redSideUserId" gorm:"type:uuid"`
 	SeriesID             *uuid.UUID `json:"seriesId" gorm:"type:uuid"`
 	GameNumber           int        `json:"gameNumber" gorm:"default:1"`
+	IsTeamDraft          bool       `json:"isTeamDraft" gorm:"default:false"`
+	LobbyID              *uuid.UUID `json:"lobbyId" gorm:"type:uuid"`
 	CreatedAt            time.Time  `json:"createdAt"`
 	StartedAt            *time.Time `json:"startedAt"`
 	CompletedAt          *time.Time `json:"completedAt"`
 
 	// Relations
-	Creator      *User `json:"creator,omitempty" gorm:"foreignKey:CreatedBy"`
-	BlueSideUser *User `json:"blueSideUser,omitempty" gorm:"foreignKey:BlueSideUserID"`
-	RedSideUser  *User `json:"redSideUser,omitempty" gorm:"foreignKey:RedSideUserID"`
+	Creator      *User        `json:"creator,omitempty" gorm:"foreignKey:CreatedBy"`
+	BlueSideUser *User        `json:"blueSideUser,omitempty" gorm:"foreignKey:BlueSideUserID"`
+	RedSideUser  *User        `json:"redSideUser,omitempty" gorm:"foreignKey:RedSideUserID"`
+	Players      []RoomPlayer `json:"players,omitempty" gorm:"foreignKey:RoomID"`
 }
 
 type Side string

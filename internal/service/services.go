@@ -6,17 +6,36 @@ import (
 )
 
 type Services struct {
-	Auth     *AuthService
-	Room     *RoomService
-	Champion *ChampionService
-	Draft    *DraftService
+	Auth        *AuthService
+	Room        *RoomService
+	Champion    *ChampionService
+	Draft       *DraftService
+	Profile     *ProfileService
+	Lobby       *LobbyService
+	Matchmaking *MatchmakingService
 }
 
 func NewServices(repos *repository.Repositories, cfg *config.Config) *Services {
+	roomService := NewRoomService(repos.Room, repos.DraftState)
+
 	return &Services{
 		Auth:     NewAuthService(repos.User, repos.Session, cfg),
-		Room:     NewRoomService(repos.Room, repos.DraftState),
+		Room:     roomService,
 		Champion: NewChampionService(repos.Champion, cfg),
 		Draft:    NewDraftService(repos.DraftState, repos.DraftAction, repos.FearlessBan),
+		Profile:  NewProfileService(repos.User, repos.UserRoleProfile),
+		Lobby: NewLobbyService(
+			repos.Lobby,
+			repos.LobbyPlayer,
+			repos.MatchOption,
+			repos.UserRoleProfile,
+			repos.RoomPlayer,
+			roomService,
+		),
+		Matchmaking: NewMatchmakingService(
+			repos.UserRoleProfile,
+			repos.MatchOption,
+			repos.Lobby,
+		),
 	}
 }

@@ -30,6 +30,8 @@ func NewRouter(services *service.Services, hub *websocket.Hub, cfg *config.Confi
 	authHandler := handlers.NewAuthHandler(services.Auth)
 	roomHandler := handlers.NewRoomHandler(services.Room, hub)
 	championHandler := handlers.NewChampionHandler(services.Champion)
+	profileHandler := handlers.NewProfileHandler(services.Profile)
+	lobbyHandler := handlers.NewLobbyHandler(services.Lobby, services.Matchmaking, hub)
 	wsHandler := handlers.NewWebSocketHandler(hub, services.Auth)
 
 	// API v1 routes
@@ -69,6 +71,27 @@ func NewRouter(services *service.Services, hub *websocket.Hub, cfg *config.Confi
 			// User routes
 			r.Route("/users", func(r chi.Router) {
 				r.Get("/me/drafts", roomHandler.GetUserRooms)
+			})
+
+			// Profile routes
+			r.Route("/profile", func(r chi.Router) {
+				r.Get("/", profileHandler.GetProfile)
+				r.Get("/roles", profileHandler.GetRoleProfiles)
+				r.Put("/roles/{role}", profileHandler.UpdateRoleProfile)
+				r.Post("/roles/initialize", profileHandler.InitializeProfiles)
+			})
+
+			// Lobby routes
+			r.Route("/lobbies", func(r chi.Router) {
+				r.Post("/", lobbyHandler.Create)
+				r.Get("/{idOrCode}", lobbyHandler.Get)
+				r.Post("/{idOrCode}/join", lobbyHandler.Join)
+				r.Post("/{idOrCode}/leave", lobbyHandler.Leave)
+				r.Post("/{idOrCode}/ready", lobbyHandler.SetReady)
+				r.Post("/{id}/generate-teams", lobbyHandler.GenerateTeams)
+				r.Get("/{id}/match-options", lobbyHandler.GetMatchOptions)
+				r.Post("/{id}/select-option", lobbyHandler.SelectOption)
+				r.Post("/{id}/start-draft", lobbyHandler.StartDraft)
 			})
 		})
 

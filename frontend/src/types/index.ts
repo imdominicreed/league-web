@@ -32,6 +32,8 @@ export interface DraftState {
   bluePicks: string[]
   redPicks: string[]
   isComplete: boolean
+  teamPlayers?: TeamPlayer[]
+  isTeamDraft?: boolean
 }
 
 export interface Player {
@@ -51,6 +53,111 @@ export interface RoomState {
 }
 
 export type Side = 'blue' | 'red' | 'spectator'
+
+export type Role = 'top' | 'jungle' | 'mid' | 'adc' | 'support'
+
+export const ALL_ROLES: Role[] = ['top', 'jungle', 'mid', 'adc', 'support']
+
+export const ROLE_DISPLAY_NAMES: Record<Role, string> = {
+  top: 'Top',
+  jungle: 'Jungle',
+  mid: 'Mid',
+  adc: 'ADC',
+  support: 'Support',
+}
+
+export const ROLE_ABBREVIATIONS: Record<Role, string> = {
+  top: 'TOP',
+  jungle: 'JGL',
+  mid: 'MID',
+  adc: 'ADC',
+  support: 'SUP',
+}
+
+export interface TeamPlayer {
+  id: string
+  displayName: string
+  team: 'blue' | 'red'
+  assignedRole: Role
+  isCaptain: boolean
+}
+
+export type LeagueRank =
+  | 'Unranked'
+  | 'Iron IV' | 'Iron III' | 'Iron II' | 'Iron I'
+  | 'Bronze IV' | 'Bronze III' | 'Bronze II' | 'Bronze I'
+  | 'Silver IV' | 'Silver III' | 'Silver II' | 'Silver I'
+  | 'Gold IV' | 'Gold III' | 'Gold II' | 'Gold I'
+  | 'Platinum IV' | 'Platinum III' | 'Platinum II' | 'Platinum I'
+  | 'Emerald IV' | 'Emerald III' | 'Emerald II' | 'Emerald I'
+  | 'Diamond IV' | 'Diamond III' | 'Diamond II' | 'Diamond I'
+  | 'Master' | 'Grandmaster' | 'Challenger'
+
+export const ALL_RANKS: LeagueRank[] = [
+  'Unranked',
+  'Iron IV', 'Iron III', 'Iron II', 'Iron I',
+  'Bronze IV', 'Bronze III', 'Bronze II', 'Bronze I',
+  'Silver IV', 'Silver III', 'Silver II', 'Silver I',
+  'Gold IV', 'Gold III', 'Gold II', 'Gold I',
+  'Platinum IV', 'Platinum III', 'Platinum II', 'Platinum I',
+  'Emerald IV', 'Emerald III', 'Emerald II', 'Emerald I',
+  'Diamond IV', 'Diamond III', 'Diamond II', 'Diamond I',
+  'Master', 'Grandmaster', 'Challenger',
+]
+
+export interface RoleProfile {
+  role: Role
+  leagueRank: LeagueRank
+  mmr: number
+  comfortRating: number
+}
+
+export interface UserProfile {
+  user: User
+  roleProfiles: RoleProfile[]
+}
+
+// Lobby types
+export type LobbyStatus = 'waiting_for_players' | 'matchmaking' | 'team_selected' | 'drafting' | 'completed'
+
+export interface Lobby {
+  id: string
+  shortCode: string
+  createdBy: string
+  status: LobbyStatus
+  selectedMatchOption: number | null
+  draftMode: 'pro_play' | 'fearless'
+  timerDurationSeconds: number
+  roomId: string | null
+  players: LobbyPlayer[]
+}
+
+export interface LobbyPlayer {
+  id: string
+  userId: string
+  displayName: string
+  team: Side | null
+  assignedRole: Role | null
+  isReady: boolean
+}
+
+export interface MatchOption {
+  optionNumber: number
+  blueTeamAvgMmr: number
+  redTeamAvgMmr: number
+  mmrDifference: number
+  balanceScore: number
+  assignments: MatchAssignment[]
+}
+
+export interface MatchAssignment {
+  userId: string
+  displayName: string
+  team: Side
+  assignedRole: Role
+  roleMmr: number
+  comfortRating: number
+}
 
 // WebSocket message types
 export interface WSMessage<T = unknown> {
