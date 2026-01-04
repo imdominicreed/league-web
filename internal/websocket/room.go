@@ -356,6 +356,11 @@ func (r *Room) handleStartDraft(client *Client) {
 	})
 	r.broadcastMessageLocked(msg)
 
+	// Send STATE_SYNC to ensure room.status updates to 'in_progress'
+	for client := range r.clients {
+		r.sendStateSyncLocked(client)
+	}
+
 	r.startTimer()
 }
 
@@ -439,6 +444,12 @@ func (r *Room) advancePhase() {
 			RedPicks:  r.draftState.RedPicks,
 		})
 		r.broadcastMessageLocked(msg)
+
+		// Send STATE_SYNC to ensure room.status updates to 'completed'
+		for client := range r.clients {
+			r.sendStateSyncLocked(client)
+		}
+
 		return
 	}
 

@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import { RootState } from '@/store'
 import { syncState, championSelected, phaseChanged, updateTimer, championHovered, draftCompleted } from '@/store/slices/draftSlice'
-import { syncRoom, playerUpdate, setConnectionStatus, setError } from '@/store/slices/roomSlice'
+import { syncRoom, playerUpdate, updateRoomStatus, setConnectionStatus, setError } from '@/store/slices/roomSlice'
 import { WSMessage, StateSyncPayload } from '@/types'
 
 const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/v1/ws`
@@ -81,6 +81,8 @@ export function useWebSocket(roomId: string, side: string) {
         dispatch(playerUpdate(message.payload as { side: string; player: { userId: string; displayName: string; ready: boolean } | null; action: string }))
         break
       case 'DRAFT_STARTED':
+        dispatch(updateRoomStatus('in_progress'))
+        // fallthrough
       case 'PHASE_CHANGED':
         dispatch(phaseChanged(message.payload as { currentPhase: number; currentTeam: string; actionType: string; timerRemainingMs: number }))
         break
@@ -94,6 +96,7 @@ export function useWebSocket(roomId: string, side: string) {
         dispatch(updateTimer(message.payload as { remainingMs: number }))
         break
       case 'DRAFT_COMPLETED':
+        dispatch(updateRoomStatus('completed'))
         dispatch(draftCompleted(message.payload as { blueBans: string[]; redBans: string[]; bluePicks: string[]; redPicks: string[] }))
         break
       case 'ERROR':

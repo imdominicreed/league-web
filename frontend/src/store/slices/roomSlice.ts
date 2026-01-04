@@ -43,6 +43,11 @@ const roomSlice = createSlice({
         state.players.red = player
       }
     },
+    updateRoomStatus: (state, action: PayloadAction<'waiting' | 'in_progress' | 'completed'>) => {
+      if (state.room) {
+        state.room.status = action.payload
+      }
+    },
     setConnectionStatus: (state, action: PayloadAction<'disconnected' | 'connecting' | 'connected'>) => {
       state.connectionStatus = action.payload
     },
@@ -57,6 +62,7 @@ export const {
   setRoom,
   syncRoom,
   playerUpdate,
+  updateRoomStatus,
   setConnectionStatus,
   setError,
   resetRoom,
