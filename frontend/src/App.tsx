@@ -1,6 +1,8 @@
+import { useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { useSelector } from 'react-redux'
-import { RootState } from './store'
+import { useDispatch, useSelector } from 'react-redux'
+import { RootState, AppDispatch } from './store'
+import { fetchCurrentUser } from './store/slices/authSlice'
 import Home from './pages/Home'
 import Login from './pages/Login'
 import Register from './pages/Register'
@@ -22,6 +24,15 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function App() {
+  const dispatch = useDispatch<AppDispatch>()
+  const { isAuthenticated, user } = useSelector((state: RootState) => state.auth)
+
+  useEffect(() => {
+    if (isAuthenticated && !user) {
+      dispatch(fetchCurrentUser())
+    }
+  }, [isAuthenticated, user, dispatch])
+
   return (
     <div className="min-h-screen bg-lol-dark">
       <Routes>
