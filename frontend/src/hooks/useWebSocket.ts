@@ -11,7 +11,7 @@ export function useWebSocket(roomId: string, side: string) {
   const dispatch = useDispatch()
   const { accessToken } = useSelector((state: RootState) => state.auth)
   const wsRef = useRef<WebSocket | null>(null)
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [isConnected, setIsConnected] = useState(false)
 
   const connect = useCallback(() => {
@@ -82,7 +82,8 @@ export function useWebSocket(roomId: string, side: string) {
         break
       case 'DRAFT_STARTED':
         dispatch(updateRoomStatus('in_progress'))
-        // fallthrough
+        dispatch(phaseChanged(message.payload as { currentPhase: number; currentTeam: string; actionType: string; timerRemainingMs: number }))
+        break
       case 'PHASE_CHANGED':
         dispatch(phaseChanged(message.payload as { currentPhase: number; currentTeam: string; actionType: string; timerRemainingMs: number }))
         break

@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useSelector } from 'react-redux'
 import { RootState } from '@/store'
+import { Champion } from '@/types'
 
 interface Props {
   onSelect: (championId: string) => void
@@ -12,10 +13,16 @@ interface Props {
 
 const ROLES = ['Fighter', 'Tank', 'Mage', 'Assassin', 'Marksman', 'Support']
 
+// Get splash art URL for the center preview
+function getSplashUrl(champion: Champion): string {
+  return `https://ddragon.leagueoflegends.com/cdn/img/champion/splash/${champion.id}_0.jpg`
+}
+
 export default function ChampionGrid({ onSelect, onLockIn, onHover, isYourTurn, disabled }: Props) {
-  const { championsList, filters } = useSelector((state: RootState) => state.champions)
+  const { championsList, champions } = useSelector((state: RootState) => state.champions)
   const draft = useSelector((state: RootState) => state.draft)
   const [selectedChampion, setSelectedChampion] = useState<string | null>(null)
+  const [hoveredChampion, setHoveredChampion] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedRoles, setSelectedRoles] = useState<string[]>([])
 
@@ -49,10 +56,25 @@ export default function ChampionGrid({ onSelect, onLockIn, onHover, isYourTurn, 
     onHover(championId)
   }
 
+  const handleMouseEnter = (championId: string) => {
+    if (isYourTurn && !usedChampions.has(championId)) {
+      setHoveredChampion(championId)
+      onHover(championId)
+    }
+  }
+
+  const handleMouseLeave = () => {
+    setHoveredChampion(null)
+    if (!selectedChampion) {
+      onHover(null)
+    }
+  }
+
   const handleLockIn = () => {
     if (selectedChampion) {
       onLockIn()
       setSelectedChampion(null)
+      setHoveredChampion(null)
     }
   }
 
@@ -65,28 +87,29 @@ export default function ChampionGrid({ onSelect, onLockIn, onHover, isYourTurn, 
   }
 
   return (
-    <div className="flex-1 flex flex-col px-4 pb-4">
-      {/* Filters */}
-      <div className="mb-4 space-y-3">
+    <div className="flex-1 flex flex-col min-h-0 p-6">
+
+      {/* Filters - Compact Row */}
+      <div className="mb-2 flex gap-2 items-center">
         {/* Search */}
         <input
           type="text"
-          placeholder="Search champions..."
+          placeholder="Search..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-lol-blue"
+          className="w-48 px-3 py-1.5 bg-lol-gray border border-lol-border rounded text-sm text-white placeholder-gray-500 focus:outline-none focus:border-lol-gold transition"
         />
 
         {/* Role filters */}
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-1 flex-wrap flex-1">
           {ROLES.map(role => (
             <button
               key={role}
               onClick={() => toggleRole(role)}
-              className={`px-3 py-1 rounded text-sm transition ${
+              className={`px-2 py-1 rounded text-xs uppercase tracking-wider transition border ${
                 selectedRoles.includes(role)
-                  ? 'bg-lol-blue text-black'
-                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                  ? 'bg-lol-gold/20 border-lol-gold text-lol-gold'
+                  : 'bg-lol-gray border-lol-border text-gray-400 hover:border-lol-gold-dark hover:text-gray-300'
               }`}
             >
               {role}
@@ -95,58 +118,58 @@ export default function ChampionGrid({ onSelect, onLockIn, onHover, isYourTurn, 
         </div>
       </div>
 
-      {/* Champion Grid */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="grid grid-cols-8 gap-2">
+      {/* Champion Grid - Smaller icons */}
+      <div className="flex-1 overflow-y-auto min-h-0 bg-lol-gray/30 rounded border border-lol-border p-3">
+        <div className="grid grid-cols-8 gap-y-8 gap-x-3">
           {filteredChampions.map(champion => {
             const isUsed = usedChampions.has(champion.id)
             const isSelected = selectedChampion === champion.id
 
             return (
-              <button
-                key={champion.id}
-                onClick={() => handleChampionClick(champion.id)}
-                onMouseEnter={() => isYourTurn && !isUsed && onHover(champion.id)}
-                onMouseLeave={() => onHover(null)}
-                disabled={isUsed || disabled || !isYourTurn}
-                className={`relative aspect-square rounded overflow-hidden transition ${
-                  isUsed
-                    ? 'opacity-30 grayscale cursor-not-allowed'
-                    : isSelected
-                    ? 'ring-2 ring-lol-gold scale-105'
-                    : 'hover:ring-2 hover:ring-white/50 hover:scale-105'
-                } ${!isYourTurn ? 'cursor-not-allowed' : ''}`}
-              >
-                <img
-                  src={champion.imageUrl}
-                  alt={champion.name}
-                  className="w-full h-full object-cover"
-                />
-                <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-xs text-center py-0.5 truncate">
+              <div key={champion.id} className="flex flex-col items-center gap-1">
+                <button
+                  onClick={() => handleChampionClick(champion.id)}
+                  onMouseEnter={() => handleMouseEnter(champion.id)}
+                  onMouseLeave={handleMouseLeave}
+                  disabled={isUsed || disabled || !isYourTurn}
+                  className={`relative w-48 h-48 overflow-hidden transition-all duration-150 border ${
+                    isUsed
+                      ? 'opacity-40 grayscale cursor-not-allowed border-transparent'
+                      : isSelected
+                      ? 'border-lol-gold shadow-[0_0_10px_rgba(200,170,110,0.5)] scale-105 z-10'
+                      : 'border-lol-border hover:border-lol-gold-dark hover:scale-105'
+                  } ${!isYourTurn && !isUsed ? 'cursor-not-allowed opacity-70' : ''}`}
+                >
+                  <img
+                    src={champion.imageUrl}
+                    alt={champion.name}
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                  />
+                </button>
+                <div className="text-sm text-lol-gold font-beaufort uppercase tracking-wider text-center truncate w-48">
                   {champion.name}
                 </div>
-              </button>
+              </div>
             )
           })}
         </div>
       </div>
 
       {/* Lock In Button */}
-      {isYourTurn && !disabled && (
-        <div className="mt-4 flex justify-center">
-          <button
-            onClick={handleLockIn}
-            disabled={!selectedChampion}
-            className={`px-8 py-3 rounded-lg font-semibold transition ${
-              selectedChampion
-                ? 'bg-lol-gold text-black hover:bg-opacity-80'
-                : 'bg-gray-700 text-gray-500 cursor-not-allowed'
-            }`}
-          >
-            Lock In
-          </button>
-        </div>
-      )}
+      <div className="mt-8 mb-4 flex justify-center">
+        <button
+          onClick={handleLockIn}
+          disabled={!selectedChampion || !isYourTurn || disabled}
+          className={`px-8 py-2 rounded font-beaufort font-bold uppercase tracking-wider text-sm transition-all ${
+            selectedChampion && isYourTurn && !disabled
+              ? 'bg-lol-gold text-lol-dark hover:brightness-110 shadow-[0_0_15px_rgba(200,170,110,0.3)]'
+              : 'bg-lol-gray border border-lol-border text-gray-500 cursor-not-allowed'
+          }`}
+        >
+          Lock In
+        </button>
+      </div>
     </div>
   )
 }

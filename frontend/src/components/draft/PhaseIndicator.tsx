@@ -29,7 +29,7 @@ const PHASES = [
 ]
 
 export default function PhaseIndicator() {
-  const { currentPhase, actionType, isComplete } = useSelector((state: RootState) => state.draft)
+  const { currentPhase, isComplete } = useSelector((state: RootState) => state.draft)
   const { room } = useSelector((state: RootState) => state.room)
 
   if (!room || room.status === 'waiting') {
