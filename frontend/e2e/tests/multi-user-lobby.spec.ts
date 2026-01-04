@@ -433,6 +433,158 @@ test.describe('Multi-User Lobby Draft Flow', () => {
   });
 });
 
+test.describe('Match Options Visibility', () => {
+  test('all users can see match options but only creator can select', async ({ lobbyWithUsers }) => {
+    test.setTimeout(120000); // 2 minutes
+
+    // Create 10 users and a lobby
+    const { lobby, users } = await lobbyWithUsers(10);
+    const [creator, ...joiners] = users;
+
+    // Ready up all users via API for speed
+    for (const user of users) {
+      await fetch(`http://localhost:9999/api/v1/lobbies/${lobby.id}/ready`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user.token}`,
+        },
+        body: JSON.stringify({ ready: true }),
+      });
+    }
+
+    // Generate teams via API (creator only)
+    const genResponse = await fetch(
+      `http://localhost:9999/api/v1/lobbies/${lobby.id}/generate-teams`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${creator.token}` },
+      }
+    );
+    expect(genResponse.ok).toBe(true);
+
+    // Navigate all users to the lobby page
+    for (const user of users) {
+      await user.page.goto(`/lobby/${lobby.id}`);
+    }
+
+    // Wait for lobby to load for all users
+    for (const user of users) {
+      await expect(user.page.locator('text=10-Man Lobby')).toBeVisible();
+    }
+
+    // All users should see "Select Team Composition" heading
+    for (let i = 0; i < users.length; i++) {
+      await expect(users[i].page.locator('text=Select Team Composition')).toBeVisible({ timeout: 10000 });
+    }
+
+    // All users should see match option cards (Option 1, Option 2, etc.)
+    for (let i = 0; i < users.length; i++) {
+      await expect(users[i].page.locator('[data-testid="match-option-1"]')).toBeVisible();
+      await expect(users[i].page.locator('text=Option 1')).toBeVisible();
+      // Should see Blue Team and Red Team sections
+      await expect(users[i].page.locator('text=Blue Team').first()).toBeVisible();
+      await expect(users[i].page.locator('text=Red Team').first()).toBeVisible();
+    }
+
+    // CREATOR should see "Select This Option" buttons
+    await expect(creator.page.locator('button:has-text("Select This Option")').first()).toBeVisible();
+
+    // NON-CREATORS should NOT see "Select This Option" buttons
+    for (const joiner of joiners) {
+      await expect(joiner.page.locator('button:has-text("Select This Option")')).not.toBeVisible();
+    }
+
+    // Creator selects an option
+    const creatorPage = new LobbyRoomPage(creator.page);
+    await creatorPage.selectOption(1);
+    await creatorPage.clickConfirmSelection();
+
+    // Wait for selection to be confirmed
+    await expect(creator.page.locator('button:has-text("Start Draft")')).toBeVisible({ timeout: 10000 });
+
+    // After selection, all users should see the selected option highlighted
+    for (const user of users) {
+      // Reload to get updated state
+      await user.page.reload();
+      await expect(user.page.locator('text=Select Team Composition')).toBeVisible({ timeout: 10000 });
+      // Option 1 should be visually selected (has gold border)
+      const option1 = user.page.locator('[data-testid="match-option-1"]');
+      await expect(option1).toHaveClass(/border-lol-gold/);
+    }
+
+    // Only creator should see "Start Draft" button
+    await expect(creator.page.locator('button:has-text("Start Draft")')).toBeVisible();
+    for (const joiner of joiners) {
+      await expect(joiner.page.locator('button:has-text("Start Draft")')).not.toBeVisible();
+    }
+  });
+
+  test('non-creator can see match options after joining late', async ({ createUsers }) => {
+    test.setTimeout(120000);
+
+    // Create 10 users
+    const users = await createUsers(10);
+    const [creator, lateJoiner, ...others] = users;
+
+    // Creator creates lobby
+    const createResponse = await fetch('http://localhost:9999/api/v1/lobbies', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${creator.token}`,
+      },
+      body: JSON.stringify({ draftMode: 'pro_play', timerDurationSeconds: 30 }),
+    });
+    const lobby = await createResponse.json();
+
+    // All users except lateJoiner join
+    for (const user of [creator, ...others]) {
+      if (user !== creator) {
+        await fetch(`http://localhost:9999/api/v1/lobbies/${lobby.id}/join`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${user.token}` },
+        });
+      }
+    }
+
+    // lateJoiner joins
+    await fetch(`http://localhost:9999/api/v1/lobbies/${lobby.id}/join`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${lateJoiner.token}` },
+    });
+
+    // Ready up all users
+    for (const user of users) {
+      await fetch(`http://localhost:9999/api/v1/lobbies/${lobby.id}/ready`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user.token}`,
+        },
+        body: JSON.stringify({ ready: true }),
+      });
+    }
+
+    // Generate teams
+    await fetch(`http://localhost:9999/api/v1/lobbies/${lobby.id}/generate-teams`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${creator.token}` },
+    });
+
+    // Now lateJoiner navigates to lobby - should see match options
+    await lateJoiner.page.goto(`/lobby/${lobby.id}`);
+    await expect(lateJoiner.page.locator('text=10-Man Lobby')).toBeVisible();
+
+    // Should see match options even though they joined after generation
+    await expect(lateJoiner.page.locator('text=Select Team Composition')).toBeVisible({ timeout: 10000 });
+    await expect(lateJoiner.page.locator('[data-testid="match-option-1"]')).toBeVisible();
+
+    // But should NOT see select buttons
+    await expect(lateJoiner.page.locator('button:has-text("Select This Option")')).not.toBeVisible();
+  });
+});
+
 test.describe('Multi-User Lobby Error Cases', () => {
   test('cannot generate teams without 10 players ready', async ({ lobbyWithUsers }) => {
     // Create 5 users (not enough for team generation)
