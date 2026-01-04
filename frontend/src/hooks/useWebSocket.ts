@@ -49,7 +49,8 @@ export function useWebSocket(roomId: string) {
       }, 3000)
     }
 
-    ws.onerror = () => {
+    ws.onerror = (event) => {
+      console.error('WebSocket connection error:', event)
       dispatch(setError('WebSocket connection error'))
     }
   }, [accessToken, roomId, dispatch])
@@ -96,6 +97,7 @@ export function useWebSocket(roomId: string) {
         dispatch(draftCompleted(message.payload as { blueBans: string[]; redBans: string[]; bluePicks: string[]; redPicks: string[] }))
         break
       case 'ERROR':
+        console.error('Server error message:', (message.payload as { message: string }).message)
         dispatch(setError((message.payload as { message: string }).message))
         break
     }

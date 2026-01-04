@@ -1,5 +1,9 @@
 .PHONY: help dev dev-backend dev-frontend db db-stop build test lint clean docker-up docker-down sync-champions
 
+# Load environment variables from .env file
+include .env
+export
+
 # Default target
 help:
 	@echo "League Draft Website - Available Commands"
@@ -36,7 +40,7 @@ dev-frontend:
 
 dev:
 	@echo "Starting development servers..."
-	@echo "Backend: http://localhost:8080"
+	@echo "Backend: http://localhost:$(PORT)"
 	@echo "Frontend: http://localhost:3000"
 	@tmux new-session -d -s league-draft 'make dev-backend' \; split-window -h 'make dev-frontend' \; attach
 
@@ -73,7 +77,7 @@ docker-logs:
 # Utilities
 sync-champions:
 	@echo "Syncing champion data from Riot API..."
-	curl -X POST http://localhost:8080/api/v1/champions/sync
+	curl -X POST http://localhost:$(PORT)/api/v1/champions/sync
 
 test:
 	@echo "Running tests..."

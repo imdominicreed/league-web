@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/dom/league-draft-website/internal/api/middleware"
@@ -41,6 +42,7 @@ type UserResponse struct {
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var req RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("ERROR [auth.Register] failed to decode request: %v", err)
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -55,6 +57,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		DisplayName: req.DisplayName,
 	})
 	if err != nil {
+		log.Printf("ERROR [auth.Register] failed to register the user: %v", err)
 		if errors.Is(err, service.ErrDisplayNameExists) {
 			http.Error(w, "Display name already exists", http.StatusConflict)
 			return

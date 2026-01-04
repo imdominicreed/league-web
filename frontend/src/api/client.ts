@@ -18,17 +18,25 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
     headers['Authorization'] = `Bearer ${token}`
   }
 
+  const fullUrl = `${API_BASE}${endpoint}`
+  console.log(`📡 API Request: ${options.method || 'GET'} ${fullUrl}`)
+  console.log(`   Full URL: ${new URL(fullUrl, window.location.origin).href}`)
+
   const response = await fetch(`${API_BASE}${endpoint}`, {
     method: options.method || 'GET',
     headers,
     body: options.body ? JSON.stringify(options.body) : undefined,
   })
 
+  console.log(`   Response: ${response.status} ${response.statusText}`)
+
   if (!response.ok) {
     const error = await response.text()
+    console.error(`❌ API Error: ${response.status} ${options.method || 'GET'} ${endpoint}`, error)
     throw new Error(error || 'Request failed')
   }
 
+  console.log(`   ✓ Success`)
   return response.json()
 }
 

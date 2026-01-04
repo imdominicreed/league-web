@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/dom/league-draft-website/internal/service"
@@ -38,6 +39,7 @@ type SyncResponse struct {
 func (h *ChampionHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	champions, err := h.championService.GetAllChampions(r.Context())
 	if err != nil {
+		log.Printf("ERROR [champion.GetAll]: %v", err)
 		http.Error(w, "Failed to get champions", http.StatusInternalServerError)
 		return
 	}
@@ -72,6 +74,7 @@ func (h *ChampionHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	champion, err := h.championService.GetChampion(r.Context(), id)
 	if err != nil {
+		log.Printf("ERROR [champion.Get] championID=%s: %v", id, err)
 		http.Error(w, "Champion not found", http.StatusNotFound)
 		return
 	}
@@ -95,7 +98,8 @@ func (h *ChampionHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *ChampionHandler) Sync(w http.ResponseWriter, r *http.Request) {
 	count, version, err := h.championService.SyncFromDataDragon(r.Context())
 	if err != nil {
-		http.Error(w, "Failed to sync champions: "+err.Error(), http.StatusInternalServerError)
+		log.Printf("ERROR [champion.Sync]: %v", err)
+		http.Error(w, "Failed to sync champions", http.StatusInternalServerError)
 		return
 	}
 
