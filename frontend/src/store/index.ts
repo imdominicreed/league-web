@@ -3,6 +3,8 @@ import authReducer from './slices/authSlice'
 import draftReducer from './slices/draftSlice'
 import championsReducer from './slices/championsSlice'
 import roomReducer from './slices/roomSlice'
+import profileReducer from './slices/profileSlice'
+import lobbyReducer from './slices/lobbySlice'
 
 export const store = configureStore({
   reducer: {
@@ -10,6 +12,8 @@ export const store = configureStore({
     draft: draftReducer,
     champions: championsReducer,
     room: roomReducer,
+    profile: profileReducer,
+    lobby: lobbyReducer,
   },
 })
 

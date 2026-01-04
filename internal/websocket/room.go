@@ -22,6 +22,14 @@ type Room struct {
 	timerDurationMs int
 	userRepo        repository.UserRepository
 
+	// Team draft mode (5v5)
+	isTeamDraft      bool
+	roomPlayers      map[uuid.UUID]*domain.RoomPlayer // userId -> RoomPlayer
+	blueCaptainID    *uuid.UUID
+	redCaptainID     *uuid.UUID
+	blueTeamClients  map[*Client]bool // Non-captain blue team members
+	redTeamClients   map[*Client]bool // Non-captain red team members
+
 	// Draft state
 	draftState     *DraftState
 	currentHover   map[string]*string // side -> championId
@@ -71,12 +79,14 @@ type ReadyRequest struct {
 
 func NewRoom(id uuid.UUID, shortCode string, timerDurationMs int, userRepo repository.UserRepository) *Room {
 	return &Room{
-		id:              id,
-		shortCode:       shortCode,
-		clients:         make(map[*Client]bool),
-		spectators:      make(map[*Client]bool),
-		timerDurationMs: timerDurationMs,
-		userRepo:        userRepo,
+		id:               id,
+		shortCode:        shortCode,
+		clients:          make(map[*Client]bool),
+		spectators:       make(map[*Client]bool),
+		blueTeamClients:  make(map[*Client]bool),
+		redTeamClients:   make(map[*Client]bool),
+		timerDurationMs:  timerDurationMs,
+		userRepo:         userRepo,
 		draftState: &DraftState{
 			CurrentPhase: 0,
 			BlueBans:     []string{},
@@ -95,6 +105,62 @@ func NewRoom(id uuid.UUID, shortCode string, timerDurationMs int, userRepo repos
 		startDraft:     make(chan *Client),
 		syncState:      make(chan *Client),
 	}
+}
+
+// InitializeTeamDraft sets up the room for 5v5 team draft mode
+func (r *Room) InitializeTeamDraft(players []*domain.RoomPlayer) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.isTeamDraft = true
+	r.roomPlayers = make(map[uuid.UUID]*domain.RoomPlayer)
+	for _, p := range players {
+		r.roomPlayers[p.UserID] = p
+		if p.IsCaptain {
+			if p.Team == domain.SideBlue {
+				r.blueCaptainID = &p.UserID
+			} else if p.Team == domain.SideRed {
+				r.redCaptainID = &p.UserID
+			}
+		}
+	}
+}
+
+// IsTeamDraft returns whether the room is in team draft mode
+func (r *Room) IsTeamDraft() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.isTeamDraft
+}
+
+// canAct checks if a user can perform pick/ban actions for the given side
+func (r *Room) canAct(userID uuid.UUID, side string) bool {
+	if r.isTeamDraft {
+		// In team draft, only captains can act
+		if side == "blue" && r.blueCaptainID != nil {
+			return userID == *r.blueCaptainID
+		}
+		if side == "red" && r.redCaptainID != nil {
+			return userID == *r.redCaptainID
+		}
+		return false
+	}
+	// Original 1v1 logic: check if client is the side's assigned client
+	return true
+}
+
+// GetPlayerTeam returns the team for a player in team draft mode
+func (r *Room) GetPlayerTeam(userID uuid.UUID) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if !r.isTeamDraft {
+		return ""
+	}
+	if player, ok := r.roomPlayers[userID]; ok {
+		return string(player.Team)
+	}
+	return ""
 }
 
 func (r *Room) getUserDisplayName(userID uuid.UUID) string {
@@ -148,25 +214,61 @@ func (r *Room) handleJoin(client *Client) {
 
 	r.clients[client] = true
 
-	switch client.side {
-	case "blue":
-		if r.blueClient != nil && r.blueClient != client {
-			client.sendError("SIDE_TAKEN", "Blue side is already taken")
-			client.side = "spectator"
-			r.spectators[client] = true
-		} else {
-			r.blueClient = client
+	// In team draft mode, only captains become blueClient/redClient
+	// Other team members are tracked separately
+	if r.isTeamDraft {
+		isCaptain := false
+		if r.blueCaptainID != nil && client.userID == *r.blueCaptainID {
+			isCaptain = true
 		}
-	case "red":
-		if r.redClient != nil && r.redClient != client {
-			client.sendError("SIDE_TAKEN", "Red side is already taken")
-			client.side = "spectator"
-			r.spectators[client] = true
-		} else {
-			r.redClient = client
+		if r.redCaptainID != nil && client.userID == *r.redCaptainID {
+			isCaptain = true
 		}
-	default:
-		r.spectators[client] = true
+
+		switch client.side {
+		case "blue":
+			if isCaptain {
+				r.blueClient = client
+				log.Printf("Blue captain %s connected", client.userID)
+			} else {
+				// Non-captain team member - track separately
+				r.blueTeamClients[client] = true
+				log.Printf("Blue team member %s connected (non-captain)", client.userID)
+			}
+		case "red":
+			if isCaptain {
+				r.redClient = client
+				log.Printf("Red captain %s connected", client.userID)
+			} else {
+				// Non-captain team member - track separately
+				r.redTeamClients[client] = true
+				log.Printf("Red team member %s connected (non-captain)", client.userID)
+			}
+		default:
+			r.spectators[client] = true
+		}
+	} else {
+		// Original 1v1 behavior
+		switch client.side {
+		case "blue":
+			if r.blueClient != nil && r.blueClient != client {
+				client.sendError("SIDE_TAKEN", "Blue side is already taken")
+				client.side = "spectator"
+				r.spectators[client] = true
+			} else {
+				r.blueClient = client
+			}
+		case "red":
+			if r.redClient != nil && r.redClient != client {
+				client.sendError("SIDE_TAKEN", "Red side is already taken")
+				client.side = "spectator"
+				r.spectators[client] = true
+			} else {
+				r.redClient = client
+			}
+		default:
+			r.spectators[client] = true
+		}
 	}
 
 	// Send state sync to joining client
@@ -186,6 +288,8 @@ func (r *Room) handleLeave(client *Client) {
 
 	delete(r.clients, client)
 	delete(r.spectators, client)
+	delete(r.blueTeamClients, client)
+	delete(r.redTeamClients, client)
 
 	if r.blueClient == client {
 		r.blueClient = nil
@@ -213,11 +317,22 @@ func (r *Room) handleSelectChampion(req *SelectChampionRequest) {
 		return
 	}
 
+	currentSide := string(phase.Team)
+
 	// Check if it's this client's turn
-	if (phase.Team == domain.SideBlue && req.Client != r.blueClient) ||
-		(phase.Team == domain.SideRed && req.Client != r.redClient) {
-		req.Client.sendError("NOT_YOUR_TURN", "It's not your turn")
-		return
+	if r.isTeamDraft {
+		// In team draft mode, use canAct to check if user is captain
+		if !r.canAct(req.Client.userID, currentSide) {
+			req.Client.sendError("NOT_YOUR_TURN", "Only the captain can pick/ban")
+			return
+		}
+	} else {
+		// Original 1v1 logic
+		if (phase.Team == domain.SideBlue && req.Client != r.blueClient) ||
+			(phase.Team == domain.SideRed && req.Client != r.redClient) {
+			req.Client.sendError("NOT_YOUR_TURN", "It's not your turn")
+			return
+		}
 	}
 
 	// Check if champion is already picked/banned
@@ -227,11 +342,11 @@ func (r *Room) handleSelectChampion(req *SelectChampionRequest) {
 	}
 
 	// Store selection (will be confirmed on lock in)
-	r.currentHover[string(phase.Team)] = &req.ChampionID
+	r.currentHover[currentSide] = &req.ChampionID
 
 	// Broadcast hover
 	msg, _ := NewMessage(MessageTypeChampionHovered, ChampionHoveredPayload{
-		Side:       string(phase.Team),
+		Side:       currentSide,
 		ChampionID: &req.ChampionID,
 	})
 	r.broadcastMessageLocked(msg)
@@ -251,14 +366,25 @@ func (r *Room) handleLockIn(client *Client) {
 		return
 	}
 
+	currentSide := string(phase.Team)
+
 	// Check if it's this client's turn
-	if (phase.Team == domain.SideBlue && client != r.blueClient) ||
-		(phase.Team == domain.SideRed && client != r.redClient) {
-		client.sendError("NOT_YOUR_TURN", "It's not your turn")
-		return
+	if r.isTeamDraft {
+		// In team draft mode, use canAct to check if user is captain
+		if !r.canAct(client.userID, currentSide) {
+			client.sendError("NOT_YOUR_TURN", "Only the captain can pick/ban")
+			return
+		}
+	} else {
+		// Original 1v1 logic
+		if (phase.Team == domain.SideBlue && client != r.blueClient) ||
+			(phase.Team == domain.SideRed && client != r.redClient) {
+			client.sendError("NOT_YOUR_TURN", "It's not your turn")
+			return
+		}
 	}
 
-	championID := r.currentHover[string(phase.Team)]
+	championID := r.currentHover[currentSide]
 	if championID == nil {
 		client.sendError("NO_SELECTION", "No champion selected")
 		return
@@ -516,11 +642,22 @@ func (r *Room) broadcastMessage(msg *Message) {
 func (r *Room) broadcastMessageLocked(msg *Message) {
 	data, _ := json.Marshal(msg)
 	for client := range r.clients {
-		select {
-		case client.send <- data:
-		default:
-			log.Printf("client send buffer full, skipping")
+		r.trySend(client, data)
+	}
+}
+
+// trySend attempts to send to a client, safely handling closed channels
+func (r *Room) trySend(client *Client, data []byte) {
+	defer func() {
+		if recover() != nil {
+			// Channel closed, client is disconnecting - skip silently
 		}
+	}()
+
+	select {
+	case client.send <- data:
+	default:
+		// Buffer full, skip
 	}
 }
 
@@ -581,6 +718,20 @@ func (r *Room) sendStateSyncLocked(client *Client) {
 		}
 	}
 
+	// Determine if this client is a captain
+	isCaptain := false
+	if r.isTeamDraft {
+		if r.blueCaptainID != nil && client.userID == *r.blueCaptainID {
+			isCaptain = true
+		}
+		if r.redCaptainID != nil && client.userID == *r.redCaptainID {
+			isCaptain = true
+		}
+	} else {
+		// In 1v1 mode, both players are effectively "captains"
+		isCaptain = client.side == "blue" || client.side == "red"
+	}
+
 	msg, _ := NewMessage(MessageTypeStateSync, StateSyncPayload{
 		Room: RoomInfo{
 			ID:            r.id.String(),
@@ -605,6 +756,8 @@ func (r *Room) sendStateSyncLocked(client *Client) {
 			Red:  redPlayer,
 		},
 		YourSide:       client.side,
+		IsCaptain:      isCaptain,
+		IsTeamDraft:    r.isTeamDraft,
 		SpectatorCount: len(r.spectators),
 	})
 

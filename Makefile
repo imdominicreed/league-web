@@ -1,4 +1,4 @@
-.PHONY: help dev dev-backend dev-frontend db db-stop build test lint clean docker-up docker-down sync-champions
+.PHONY: help dev dev-backend dev-frontend db db-stop db-clean build test lint clean docker-up docker-down sync-champions
 
 # Load environment variables from .env file
 include .env
@@ -14,10 +14,16 @@ help:
 	@echo "  make dev-frontend  - Start React dev server"
 	@echo "  make db            - Start PostgreSQL database"
 	@echo "  make db-stop       - Stop PostgreSQL database"
+	@echo "  make db-clean      - Remove database volume (fresh start)"
+	@echo ""
+	@echo "Lobby Simulator:"
+	@echo "  make dev-lobby     - Create 10-player lobby ready for draft"
+	@echo "  make dev-lobby-populate LOBBY=<code> - Add players to existing lobby"
 	@echo ""
 	@echo "Build:"
 	@echo "  make build         - Build Go backend"
 	@echo "  make build-frontend- Build React frontend"
+	@echo "  make simulator-build - Build lobby simulator CLI"
 	@echo ""
 	@echo "Docker:"
 	@echo "  make docker-up     - Start all services with Docker Compose"
@@ -52,6 +58,12 @@ db:
 db-stop:
 	@echo "Stopping PostgreSQL..."
 	docker compose stop postgres
+
+db-clean:
+	@echo "Cleaning database..."
+	docker compose down postgres -v
+	docker volume rm league-draft-website_postgres_data 2>/dev/null || true
+	@echo "Database cleaned. Run 'make db' to start fresh."
 
 # Build
 build:
@@ -100,3 +112,18 @@ install:
 	go mod download
 	@echo "Installing frontend dependencies..."
 	cd frontend && npm install
+
+# Simulator commands
+simulator-build:
+	@echo "Building lobby simulator..."
+	go build -o bin/simulator ./cmd/simulator
+
+# Quick lobby population for development - creates 10-player lobby ready for draft
+dev-lobby: simulator-build
+	@echo "Creating 10-player lobby..."
+	./bin/simulator full
+
+# Populate existing lobby with fake users
+dev-lobby-populate: simulator-build
+	@echo "Usage: make dev-lobby-populate LOBBY=<code> COUNT=9"
+	./bin/simulator populate --lobby=$(LOBBY) --count=$(COUNT)

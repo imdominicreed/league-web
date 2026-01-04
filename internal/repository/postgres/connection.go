@@ -25,6 +25,12 @@ func NewConnection(databaseURL string) (*gorm.DB, error) {
 		&domain.DraftAction{},
 		&domain.Champion{},
 		&domain.FearlessBan{},
+		&domain.UserRoleProfile{},
+		&domain.Lobby{},
+		&domain.LobbyPlayer{},
+		&domain.MatchOption{},
+		&domain.MatchOptionAssignment{},
+		&domain.RoomPlayer{},
 	)
 	if err != nil {
 		return nil, err
@@ -35,12 +41,17 @@ func NewConnection(databaseURL string) (*gorm.DB, error) {
 
 func NewRepositories(db *gorm.DB) *repository.Repositories {
 	return &repository.Repositories{
-		User:        NewUserRepository(db),
-		Session:     NewSessionRepository(db),
-		Room:        NewRoomRepository(db),
-		DraftState:  NewDraftStateRepository(db),
-		DraftAction: NewDraftActionRepository(db),
-		Champion:    NewChampionRepository(db),
-		FearlessBan: NewFearlessBanRepository(db),
+		User:            NewUserRepository(db),
+		Session:         NewSessionRepository(db),
+		Room:            NewRoomRepository(db),
+		DraftState:      NewDraftStateRepository(db),
+		DraftAction:     NewDraftActionRepository(db),
+		Champion:        NewChampionRepository(db),
+		FearlessBan:     NewFearlessBanRepository(db),
+		UserRoleProfile: NewUserRoleProfileRepository(db),
+		Lobby:           NewLobbyRepository(db),
+		LobbyPlayer:     NewLobbyPlayerRepository(db),
+		MatchOption:     NewMatchOptionRepository(db),
+		RoomPlayer:      NewRoomPlayerRepository(db),
 	}
 }

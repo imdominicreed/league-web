@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"context"
 	"log"
 	"sync"
 
@@ -9,13 +10,14 @@ import (
 )
 
 type Hub struct {
-	rooms      map[string]*Room
-	clients    map[*Client]bool
-	register   chan *Client
-	unregister chan *Client
-	joinRoom   chan *JoinRoomRequest
-	userRepo   repository.UserRepository
-	mu         sync.RWMutex
+	rooms          map[string]*Room
+	clients        map[*Client]bool
+	register       chan *Client
+	unregister     chan *Client
+	joinRoom       chan *JoinRoomRequest
+	userRepo       repository.UserRepository
+	roomPlayerRepo repository.RoomPlayerRepository
+	mu             sync.RWMutex
 }
 
 type JoinRoomRequest struct {
@@ -24,14 +26,15 @@ type JoinRoomRequest struct {
 	Side   string
 }
 
-func NewHub(userRepo repository.UserRepository) *Hub {
+func NewHub(userRepo repository.UserRepository, roomPlayerRepo repository.RoomPlayerRepository) *Hub {
 	return &Hub{
-		rooms:      make(map[string]*Room),
-		clients:    make(map[*Client]bool),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
-		joinRoom:   make(chan *JoinRoomRequest),
-		userRepo:   userRepo,
+		rooms:          make(map[string]*Room),
+		clients:        make(map[*Client]bool),
+		register:       make(chan *Client),
+		unregister:     make(chan *Client),
+		joinRoom:       make(chan *JoinRoomRequest),
+		userRepo:       userRepo,
+		roomPlayerRepo: roomPlayerRepo,
 	}
 }
 
@@ -76,7 +79,43 @@ func (h *Hub) handleJoinRoom(req *JoinRoomRequest) {
 		req.Client.room.leave <- req.Client
 	}
 
-	req.Client.side = req.Side
+	// Parse room ID as UUID for database lookups
+	roomUUID, err := uuid.Parse(req.RoomID)
+	if err != nil {
+		// Try to find room by short code - use the room's actual ID
+		roomUUID = room.id
+	}
+
+	// Check if this is a team draft room by looking up room players
+	if h.roomPlayerRepo != nil {
+		ctx := context.Background()
+
+		// Look up the user's RoomPlayer to determine their team
+		roomPlayer, err := h.roomPlayerRepo.GetByRoomAndUser(ctx, roomUUID, req.Client.userID)
+		if err == nil && roomPlayer != nil {
+			// User is a room player - assign their side based on team
+			req.Client.side = string(roomPlayer.Team)
+
+			// Initialize team draft if not already done
+			if !room.IsTeamDraft() {
+				players, err := h.roomPlayerRepo.GetByRoomID(ctx, roomUUID)
+				if err == nil && len(players) > 0 {
+					room.InitializeTeamDraft(players)
+					log.Printf("Initialized team draft for room %s with %d players", roomUUID, len(players))
+				}
+			}
+		} else if req.Side == "" {
+			// User is not a room player and no side specified - they are a spectator
+			req.Client.side = "spectator"
+		} else {
+			// Use the requested side (1v1 mode or explicit side selection)
+			req.Client.side = req.Side
+		}
+	} else {
+		// No roomPlayerRepo available - use original behavior
+		req.Client.side = req.Side
+	}
+
 	req.Client.room = room
 	room.join <- req.Client
 }
