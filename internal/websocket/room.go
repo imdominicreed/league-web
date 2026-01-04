@@ -642,11 +642,22 @@ func (r *Room) broadcastMessage(msg *Message) {
 func (r *Room) broadcastMessageLocked(msg *Message) {
 	data, _ := json.Marshal(msg)
 	for client := range r.clients {
-		select {
-		case client.send <- data:
-		default:
-			log.Printf("client send buffer full, skipping")
+		r.trySend(client, data)
+	}
+}
+
+// trySend attempts to send to a client, safely handling closed channels
+func (r *Room) trySend(client *Client, data []byte) {
+	defer func() {
+		if recover() != nil {
+			// Channel closed, client is disconnecting - skip silently
 		}
+	}()
+
+	select {
+	case client.send <- data:
+	default:
+		// Buffer full, skip
 	}
 }
 

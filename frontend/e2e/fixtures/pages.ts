@@ -476,7 +476,8 @@ export class DraftRoomPage {
   }
 
   async expectDraftComplete() {
-    await expect(this.page.locator('text=Draft Complete')).toBeVisible({ timeout: 30000 });
+    // BanBar shows "Complete" (styled as uppercase "COMPLETE" via CSS)
+    await expect(this.page.locator('text=Complete')).toBeVisible({ timeout: 30000 });
   }
 
   async getRoomCode(): Promise<string> {
@@ -505,5 +506,100 @@ export class DraftRoomPage {
 
     await this.clickLockIn();
     await this.page.waitForTimeout(500);
+  }
+
+  // ========== Edge Case Test Helpers ==========
+
+  async isChampionDisabled(championName: string): Promise<boolean> {
+    // Check if a specific champion button is disabled (banned or picked)
+    const championButton = this.page.locator(
+      `[data-testid="champion-grid"] button:has(img[alt="${championName}"])`
+    );
+    const isDisabled = await championButton.getAttribute('disabled');
+    return isDisabled !== null;
+  }
+
+  async isChampionDisabledByIndex(index: number): Promise<boolean> {
+    // Check if the nth champion button is disabled
+    const championButtons = this.page.locator('[data-testid="champion-grid"] button');
+    const button = championButtons.nth(index);
+    const isDisabled = await button.getAttribute('disabled');
+    return isDisabled !== null;
+  }
+
+  async getTimerSeconds(): Promise<number> {
+    // Get the timer value from the BanBar (shows as large number in center)
+    const timerText = await this.page.locator('.font-beaufort.text-3xl').textContent();
+    return timerText ? parseInt(timerText, 10) : 0;
+  }
+
+  async getCurrentAction(): Promise<string> {
+    // Get current action text like "Blue Ban" or "Red Pick"
+    // This is the small text below the timer in the BanBar's center section
+    // Use .text-center to target only the timer section, not team headers
+    const actionText = await this.page.locator('.text-center .text-xs.uppercase.tracking-wider').textContent();
+    return actionText || '';
+  }
+
+  async waitForPhaseChange(fromAction: string, timeout: number = 30000): Promise<void> {
+    // Wait for the action text to change from the current action
+    await expect(
+      this.page.locator('.text-center .text-xs.uppercase.tracking-wider')
+    ).not.toHaveText(fromAction, { timeout });
+  }
+
+  async waitForTimerBelow(seconds: number, timeout: number = 30000): Promise<void> {
+    // Wait until timer drops below a certain value
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeout) {
+      const current = await this.getTimerSeconds();
+      if (current > 0 && current <= seconds) {
+        return;
+      }
+      await this.page.waitForTimeout(500);
+    }
+    throw new Error(`Timer did not drop below ${seconds}s within ${timeout}ms`);
+  }
+
+  async getBannedChampionNames(): Promise<string[]> {
+    // Get all banned champion names from the ban bar
+    // Champions in ban bar have grayscale + red X overlay
+    const banSlots = this.page.locator('.grayscale.opacity-60');
+    const count = await banSlots.count();
+    const names: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const alt = await banSlots.nth(i).getAttribute('alt');
+      if (alt) names.push(alt);
+    }
+    return names;
+  }
+
+  async getEnabledChampionCount(): Promise<number> {
+    // Count how many champions are currently enabled (clickable)
+    const enabledButtons = this.page.locator(
+      '[data-testid="champion-grid"] button:not([disabled])'
+    );
+    return enabledButtons.count();
+  }
+
+  async getDisabledChampionCount(): Promise<number> {
+    // Count how many champions are currently disabled
+    const disabledButtons = this.page.locator(
+      '[data-testid="champion-grid"] button[disabled]'
+    );
+    return disabledButtons.count();
+  }
+
+  async isDraftComplete(): Promise<boolean> {
+    // Check if "Complete" text is shown in the timer area
+    const completeText = this.page.locator('text=Complete');
+    return completeText.isVisible({ timeout: 1000 }).catch(() => false);
+  }
+
+  async reloadAndReconnect(): Promise<void> {
+    // Reload the page and wait for WebSocket reconnection
+    await this.page.reload();
+    await this.waitForDraftLoaded();
+    await this.waitForWebSocketConnected();
   }
 }
