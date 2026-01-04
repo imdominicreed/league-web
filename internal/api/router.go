@@ -1,0 +1,80 @@
+package api
+
+import (
+	"net/http"
+
+	"github.com/dom/league-draft-website/internal/api/handlers"
+	"github.com/dom/league-draft-website/internal/api/middleware"
+	"github.com/dom/league-draft-website/internal/config"
+	"github.com/dom/league-draft-website/internal/service"
+	"github.com/dom/league-draft-website/internal/websocket"
+	"github.com/go-chi/chi/v5"
+	chiMiddleware "github.com/go-chi/chi/v5/middleware"
+)
+
+func NewRouter(services *service.Services, hub *websocket.Hub, cfg *config.Config) http.Handler {
+	r := chi.NewRouter()
+
+	// Global middleware
+	r.Use(chiMiddleware.Logger)
+	r.Use(chiMiddleware.Recoverer)
+	r.Use(chiMiddleware.RequestID)
+	r.Use(middleware.CORS)
+
+	// Health check
+	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("OK"))
+	})
+
+	// Initialize handlers
+	authHandler := handlers.NewAuthHandler(services.Auth)
+	roomHandler := handlers.NewRoomHandler(services.Room, hub)
+	championHandler := handlers.NewChampionHandler(services.Champion)
+	wsHandler := handlers.NewWebSocketHandler(hub, services.Auth)
+
+	// API v1 routes
+	r.Route("/api/v1", func(r chi.Router) {
+		// Public auth routes
+		r.Route("/auth", func(r chi.Router) {
+			r.Post("/register", authHandler.Register)
+			r.Post("/login", authHandler.Login)
+
+			// Protected auth routes
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.Auth(services.Auth))
+				r.Get("/me", authHandler.Me)
+				r.Post("/logout", authHandler.Logout)
+			})
+		})
+
+		// Champion routes (public for now)
+		r.Route("/champions", func(r chi.Router) {
+			r.Get("/", championHandler.GetAll)
+			r.Get("/{id}", championHandler.Get)
+			r.Post("/sync", championHandler.Sync) // Should be admin-only in production
+		})
+
+		// Protected routes
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.Auth(services.Auth))
+
+			// Room routes
+			r.Route("/rooms", func(r chi.Router) {
+				r.Post("/", roomHandler.Create)
+				r.Get("/{idOrCode}", roomHandler.Get)
+				r.Post("/{idOrCode}/join", roomHandler.Join)
+				r.Get("/code/{code}", roomHandler.GetByCode)
+			})
+
+			// User routes
+			r.Route("/users", func(r chi.Router) {
+				r.Get("/me/drafts", roomHandler.GetUserRooms)
+			})
+		})
+
+		// WebSocket endpoint
+		r.Get("/ws", wsHandler.Handle)
+	})
+
+	return r
+}
