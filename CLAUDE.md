@@ -74,6 +74,8 @@ Server → Client: `STATE_SYNC`, `PLAYER_UPDATE`, `PHASE_CHANGED`, `CHAMPION_SEL
 
 ## Environment Variables
 
+### Backend (`.env` in project root)
+
 Required:
 - `JWT_SECRET` - Secret key for JWT signing
 - `DATABASE_URL` - PostgreSQL connection string
@@ -82,6 +84,10 @@ Optional:
 - `PORT` - Server port (default: 9090)
 - `DEFAULT_TIMER_SECONDS` - Draft timer (default: 30)
 - `DDRAGON_VERSION` - Lock to specific patch version
+
+### Frontend (`frontend/.env`)
+
+- `VITE_API_URL` - Backend API URL for dev proxy (default: http://localhost:9090)
 
 ## Testing
 
