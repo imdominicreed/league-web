@@ -166,7 +166,12 @@ func (h *RoomHandler) Join(w http.ResponseWriter, r *http.Request) {
 	// Support auto-assignment
 	assignedSide := side
 	if req.Side == "auto" {
-		if room.BlueSideUserID == nil {
+		// First check if user is already assigned to a side (handles rejoins/refreshes)
+		if room.BlueSideUserID != nil && *room.BlueSideUserID == userID {
+			assignedSide = domain.SideBlue
+		} else if room.RedSideUserID != nil && *room.RedSideUserID == userID {
+			assignedSide = domain.SideRed
+		} else if room.BlueSideUserID == nil {
 			assignedSide = domain.SideBlue
 		} else if room.RedSideUserID == nil {
 			assignedSide = domain.SideRed
