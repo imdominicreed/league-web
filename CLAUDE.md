@@ -226,20 +226,6 @@ Uses **Playwright** with page objects and multi-user fixtures.
 - **Auth Error Logging**: Authentication middleware logs all auth failures
 - **WSL Compatibility**: Backend port updated to 9999 for WSL environment
 
-## Commit Convention
-
-Use [Conventional Commits](https://www.conventionalcommits.org/):
-
-```
-<type>(<scope>): <description>
-
-[optional body]
-```
-
-**Types**: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
-
-**Scopes**: `backend`, `frontend`, `ws`, `api`, `lobby`, `draft`, `auth`, `e2e`
-
 ## Notes
 
 - Champion data synced from Riot Data Dragon CDN
