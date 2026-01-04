@@ -10,9 +10,6 @@ interface Props {
   hoveredChampion: string | null
 }
 
-// Position labels for picks
-const POSITIONS = ['TOP', 'JGL', 'MID', 'BOT', 'SUP']
-
 // Get splash art URL for a champion
 function getSplashUrl(champion: Champion): string {
   return `https://ddragon.leagueoflegends.com/cdn/img/champion/loading/${champion.id}_0.jpg`
@@ -29,13 +26,13 @@ export default function TeamPanel({ side, player, picks, isActive, hoveredChampi
   const currentActionChampion = isActive && hoveredChampion ? hoveredChampion : null
 
   return (
-    <div className={`w-36 bg-lol-dark-blue flex flex-col border-l border-r border-lol-border ${
+    <div className={`w-56 bg-lol-dark-blue flex flex-col border-l border-r border-lol-border pb-4 ${
       isActive ? borderColor : ''
     }`}>
       {/* Team Header */}
-      <div className={`px-3 py-2 border-b border-lol-border bg-${teamColor}/10`}>
-        <div className={`font-beaufort text-${teamColor} text-sm uppercase tracking-wider`}>
-          {side === 'blue' ? 'Blue' : 'Red'} Side
+      <div className={`px-2 py-1.5 border-b border-lol-border bg-${teamColor}/10`}>
+        <div className={`font-beaufort text-${teamColor} text-xs uppercase tracking-wider`}>
+          {side === 'blue' ? 'Blue' : 'Red'}
         </div>
         <div className="text-lol-gold-light text-xs truncate">
           {player?.displayName || 'Waiting...'}
@@ -66,10 +63,10 @@ export default function TeamPanel({ side, player, picks, isActive, hoveredChampi
                     className="absolute inset-0 w-full h-full object-cover object-top"
                   />
                   {/* Gradient overlay for text readability */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
                   {/* Champion name */}
-                  <div className="absolute bottom-0 left-0 right-0 p-2">
-                    <div className="text-white text-xs font-semibold truncate">
+                  <div className="absolute bottom-0 left-0 right-0 p-1">
+                    <div className="text-lol-gold text-sm font-beaufort uppercase tracking-wider font-semibold truncate">
                       {champion.name}
                     </div>
                   </div>
@@ -82,22 +79,16 @@ export default function TeamPanel({ side, player, picks, isActive, hoveredChampi
                     alt="Selecting..."
                     className="absolute inset-0 w-full h-full object-cover object-top opacity-60"
                   />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
-                  <div className="absolute bottom-0 left-0 right-0 p-2">
-                    <div className="text-lol-gold text-xs font-semibold truncate">
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+                  <div className="absolute bottom-0 left-0 right-0 p-1">
+                    <div className="text-lol-gold text-sm font-beaufort uppercase tracking-wider font-semibold truncate">
                       {champions[currentActionChampion].name}
                     </div>
                   </div>
                 </>
               ) : (
                 // Empty slot
-                <div className="absolute inset-0 flex items-center justify-center bg-lol-gray/30">
-                  <span className={`font-beaufort text-sm ${
-                    isCurrentPick ? 'text-lol-gold' : 'text-gray-600'
-                  }`}>
-                    {POSITIONS[i]}
-                  </span>
-                </div>
+                <div className="absolute inset-0 bg-lol-gray/30" />
               )}
             </div>
           )

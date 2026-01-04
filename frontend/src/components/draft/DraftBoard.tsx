@@ -27,13 +27,13 @@ export default function DraftBoard({ ws }: Props) {
   return (
     <div className="h-screen flex flex-col bg-lol-dark overflow-hidden">
       {/* Top Bar with Room Code and Connection Status */}
-      <header className="bg-lol-dark-blue/80 border-b border-lol-border px-4 py-2 flex items-center justify-between">
-        <div className="text-sm text-lol-gold-light">
+      <header className="bg-lol-dark-blue/80 border-b border-lol-border px-3 py-1 flex items-center justify-between">
+        <div className="text-xs text-lol-gold-light">
           Room: <span className="font-mono text-lol-gold">{room.shortCode}</span>
         </div>
         <div className="flex items-center gap-2">
           {!ws.isConnected && (
-            <span className="text-red-team text-sm">Disconnected</span>
+            <span className="text-red-team text-xs">Disconnected</span>
           )}
         </div>
       </header>
@@ -47,7 +47,7 @@ export default function DraftBoard({ ws }: Props) {
       />
 
       {/* Main Content */}
-      <main className="flex-1 flex min-h-0">
+      <main className="flex-1 flex min-h-0 px-4">
         {/* Blue Side Picks */}
         <TeamPanel
           side="blue"
@@ -61,16 +61,16 @@ export default function DraftBoard({ ws }: Props) {
         <div className="flex-1 flex flex-col min-h-0 bg-lol-dark">
           {isWaiting ? (
             <div className="flex-1 flex flex-col items-center justify-center">
-              <h2 className="font-beaufort text-2xl text-lol-gold-light mb-8 uppercase tracking-wider">
+              <h2 className="font-beaufort text-lg text-lol-gold-light mb-6 uppercase tracking-wider">
                 Waiting for Players
               </h2>
 
-              <div className="flex gap-12 mb-8">
+              <div className="flex gap-8 mb-6">
                 <div className="text-center">
-                  <div className="font-beaufort text-blue-team text-lg uppercase tracking-wider mb-3">
+                  <div className="font-beaufort text-blue-team text-sm uppercase tracking-wider mb-2">
                     Blue Side
                   </div>
-                  <div className={`px-6 py-3 rounded border-2 ${
+                  <div className={`px-4 py-2 rounded border-2 text-sm ${
                     players.blue
                       ? 'border-blue-team bg-blue-team/10 text-blue-team'
                       : 'border-lol-gray bg-lol-gray/20 text-gray-500'
@@ -82,10 +82,10 @@ export default function DraftBoard({ ws }: Props) {
                   </div>
                 </div>
                 <div className="text-center">
-                  <div className="font-beaufort text-red-team text-lg uppercase tracking-wider mb-3">
+                  <div className="font-beaufort text-red-team text-sm uppercase tracking-wider mb-2">
                     Red Side
                   </div>
-                  <div className={`px-6 py-3 rounded border-2 ${
+                  <div className={`px-4 py-2 rounded border-2 text-sm ${
                     players.red
                       ? 'border-red-team bg-red-team/10 text-red-team'
                       : 'border-lol-gray bg-lol-gray/20 text-gray-500'
@@ -101,7 +101,7 @@ export default function DraftBoard({ ws }: Props) {
               {draft.yourSide !== 'spectator' && (
                 <button
                   onClick={() => ws.setReady(true)}
-                  className="bg-lol-blue-accent text-lol-dark font-beaufort font-bold py-3 px-8 rounded uppercase tracking-wider hover:brightness-110 transition"
+                  className="bg-lol-blue-accent text-lol-dark font-beaufort font-bold py-2 px-6 rounded text-sm uppercase tracking-wider hover:brightness-110 transition"
                 >
                   Ready
                 </button>
@@ -110,7 +110,7 @@ export default function DraftBoard({ ws }: Props) {
               {players.blue?.ready && players.red?.ready && (
                 <button
                   onClick={() => ws.startDraft()}
-                  className="mt-4 bg-lol-gold text-lol-dark font-beaufort font-bold py-3 px-8 rounded uppercase tracking-wider hover:brightness-110 transition"
+                  className="mt-3 bg-lol-gold text-lol-dark font-beaufort font-bold py-2 px-6 rounded text-sm uppercase tracking-wider hover:brightness-110 transition"
                 >
                   Start Draft
                 </button>
