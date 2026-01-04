@@ -2,8 +2,7 @@ import { useSelector } from 'react-redux'
 import { RootState } from '@/store'
 import TeamPanel from './TeamPanel'
 import ChampionGrid from './ChampionGrid'
-import DraftTimer from './DraftTimer'
-import PhaseIndicator from './PhaseIndicator'
+import BanBar from './BanBar'
 
 interface Props {
   ws: {
@@ -26,56 +25,75 @@ export default function DraftBoard({ ws }: Props) {
   const isYourTurn = draft.yourSide === draft.currentTeam
 
   return (
-    <div className="min-h-screen flex flex-col">
-      {/* Header */}
-      <header className="bg-gray-900 border-b border-gray-800 px-4 py-3">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="text-sm text-gray-400">
-            Room: <span className="text-lol-gold font-mono">{room.shortCode}</span>
-          </div>
-          <PhaseIndicator />
-          <div className="flex items-center gap-2">
-            {!ws.isConnected && (
-              <span className="text-red-500 text-sm">Disconnected</span>
-            )}
-          </div>
+    <div className="h-screen flex flex-col bg-lol-dark overflow-hidden">
+      {/* Top Bar with Room Code and Connection Status */}
+      <header className="bg-lol-dark-blue/80 border-b border-lol-border px-4 py-2 flex items-center justify-between">
+        <div className="text-sm text-lol-gold-light">
+          Room: <span className="font-mono text-lol-gold">{room.shortCode}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {!ws.isConnected && (
+            <span className="text-red-team text-sm">Disconnected</span>
+          )}
         </div>
       </header>
 
+      {/* Ban Bar with Timer */}
+      <BanBar
+        blueBans={draft.blueBans}
+        redBans={draft.redBans}
+        isBlueActive={draft.currentTeam === 'blue'}
+        isRedActive={draft.currentTeam === 'red'}
+      />
+
       {/* Main Content */}
-      <main className="flex-1 flex">
-        {/* Blue Side */}
+      <main className="flex-1 flex min-h-0">
+        {/* Blue Side Picks */}
         <TeamPanel
           side="blue"
           player={players.blue}
-          bans={draft.blueBans}
           picks={draft.bluePicks}
           isActive={draft.currentTeam === 'blue'}
           hoveredChampion={draft.hoveredChampion.blue}
         />
 
-        {/* Center - Champion Grid */}
-        <div className="flex-1 flex flex-col">
-          {/* Timer */}
-          <div className="py-4">
-            <DraftTimer />
-          </div>
-
+        {/* Center - Champion Grid or Waiting State */}
+        <div className="flex-1 flex flex-col min-h-0 bg-lol-dark">
           {isWaiting ? (
             <div className="flex-1 flex flex-col items-center justify-center">
-              <h2 className="text-2xl text-gray-400 mb-8">Waiting for players...</h2>
+              <h2 className="font-beaufort text-2xl text-lol-gold-light mb-8 uppercase tracking-wider">
+                Waiting for Players
+              </h2>
 
-              <div className="flex gap-8 mb-8">
+              <div className="flex gap-12 mb-8">
                 <div className="text-center">
-                  <div className="text-blue-side font-semibold mb-2">Blue Side</div>
-                  <div className={`px-4 py-2 rounded ${players.blue ? 'bg-blue-side/20 text-blue-side' : 'bg-gray-800 text-gray-500'}`}>
+                  <div className="font-beaufort text-blue-team text-lg uppercase tracking-wider mb-3">
+                    Blue Side
+                  </div>
+                  <div className={`px-6 py-3 rounded border-2 ${
+                    players.blue
+                      ? 'border-blue-team bg-blue-team/10 text-blue-team'
+                      : 'border-lol-gray bg-lol-gray/20 text-gray-500'
+                  }`}>
                     {players.blue?.displayName || 'Waiting...'}
+                    {players.blue?.ready && (
+                      <span className="ml-2 text-green-500">✓</span>
+                    )}
                   </div>
                 </div>
                 <div className="text-center">
-                  <div className="text-red-side font-semibold mb-2">Red Side</div>
-                  <div className={`px-4 py-2 rounded ${players.red ? 'bg-red-side/20 text-red-side' : 'bg-gray-800 text-gray-500'}`}>
+                  <div className="font-beaufort text-red-team text-lg uppercase tracking-wider mb-3">
+                    Red Side
+                  </div>
+                  <div className={`px-6 py-3 rounded border-2 ${
+                    players.red
+                      ? 'border-red-team bg-red-team/10 text-red-team'
+                      : 'border-lol-gray bg-lol-gray/20 text-gray-500'
+                  }`}>
                     {players.red?.displayName || 'Waiting...'}
+                    {players.red?.ready && (
+                      <span className="ml-2 text-green-500">✓</span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -83,7 +101,7 @@ export default function DraftBoard({ ws }: Props) {
               {draft.yourSide !== 'spectator' && (
                 <button
                   onClick={() => ws.setReady(true)}
-                  className="bg-lol-blue text-black font-semibold py-2 px-6 rounded-lg hover:bg-opacity-80 transition"
+                  className="bg-lol-blue-accent text-lol-dark font-beaufort font-bold py-3 px-8 rounded uppercase tracking-wider hover:brightness-110 transition"
                 >
                   Ready
                 </button>
@@ -92,7 +110,7 @@ export default function DraftBoard({ ws }: Props) {
               {players.blue?.ready && players.red?.ready && (
                 <button
                   onClick={() => ws.startDraft()}
-                  className="mt-4 bg-lol-gold text-black font-semibold py-2 px-6 rounded-lg hover:bg-opacity-80 transition"
+                  className="mt-4 bg-lol-gold text-lol-dark font-beaufort font-bold py-3 px-8 rounded uppercase tracking-wider hover:brightness-110 transition"
                 >
                   Start Draft
                 </button>
@@ -109,11 +127,10 @@ export default function DraftBoard({ ws }: Props) {
           )}
         </div>
 
-        {/* Red Side */}
+        {/* Red Side Picks */}
         <TeamPanel
           side="red"
           player={players.red}
-          bans={draft.redBans}
           picks={draft.redPicks}
           isActive={draft.currentTeam === 'red'}
           hoveredChampion={draft.hoveredChampion.red}
