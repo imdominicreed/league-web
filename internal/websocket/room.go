@@ -386,8 +386,9 @@ func (r *Room) handleLockIn(client *Client) {
 
 	championID := r.currentHover[currentSide]
 	if championID == nil {
-		client.sendError("NO_SELECTION", "No champion selected")
-		return
+		none := "None"
+		championID = &none
+
 	}
 
 	// Apply the selection
@@ -543,13 +544,31 @@ func (r *Room) handleTimerExpired() {
 		return
 	}
 
-	// Auto-select random available champion
-	// For now, just skip (in production, pick random)
-	msg, _ := NewMessage(MessageTypeTimerExpired, TimerExpiredPayload{
-		Phase:        r.draftState.CurrentPhase,
-		AutoSelected: nil,
+	// // Auto-select random available champion
+	// // For now, just skip (in production, pick random)
+	// msg, _ := NewMessage(MessageTypeTimerExpired, TimerExpiredPayload{
+	// 	Phase:        r.draftState.CurrentPhase,
+	// 	AutoSelected: nil,
+	// })
+	// r.broadcastMessageLocked(msg)
+	// Apply the selection
+	championID := "None"
+	r.applySelection(phase, championID)
+
+	// Stop current timer
+	if r.timer != nil {
+		r.timer.Stop()
+	}
+
+	// Broadcast selection
+	msg, _ := NewMessage(MessageTypeChampionSelected, ChampionSelectedPayload{
+		Phase:      r.draftState.CurrentPhase,
+		Team:       string(phase.Team),
+		ActionType: string(phase.ActionType),
+		ChampionID: championID,
 	})
 	r.broadcastMessageLocked(msg)
+
 
 	r.advancePhase()
 }
