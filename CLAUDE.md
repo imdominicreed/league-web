@@ -56,7 +56,7 @@ frontend/src/
 | `internal/domain/draft.go` | Phase sequence (20 phases for pro play) |
 | `internal/domain/lobby.go` | Lobby and LobbyPlayer entities |
 | `internal/domain/matchmaking.go` | MatchOption, MatchOptionAssignment, RoomPlayer entities |
-| `internal/service/matchmaking_service.go` | Team balancing algorithm |
+| `internal/service/matchmaking_service.go` | Multi-algorithm team balancing (MMR, comfort, hybrid, lane) |
 | `internal/service/lobby_service.go` | Lobby lifecycle management |
 | `frontend/src/hooks/useWebSocket.ts` | WS connection, message dispatch to Redux |
 | `frontend/src/components/draft/DraftBoard.tsx` | Main draft UI composition |
@@ -89,8 +89,8 @@ The lobby system enables 10-player team drafts with role-based matchmaking.
 1. Creator creates lobby with draft mode (pro_play/fearless) and timer settings
 2. Players join via lobby code, set ready status
 3. When all 10 players ready, creator generates team options
-4. Matchmaking algorithm creates 5 balanced team compositions
-5. Creator selects preferred option
+4. Matchmaking algorithm creates up to 8 balanced team compositions (using 4 different algorithms)
+5. Creator selects preferred option (each shows algorithm type badge and key metrics)
 6. "Start Draft" creates a Room with team assignments
 7. Players auto-join correct side, captains handle picks/bans
 
@@ -101,7 +101,7 @@ The lobby system enables 10-player team drafts with role-based matchmaking.
 | `Lobby` | 10-player lobby with status, settings, short code |
 | `LobbyPlayer` | Player in lobby with ready status |
 | `UserRoleProfile` | Per-role rank (Iron IV - Challenger), MMR, comfort rating (1-5) |
-| `MatchOption` | Generated team composition with balance score |
+| `MatchOption` | Generated team composition with algorithm type, balance score, comfort averages, max lane diff |
 | `MatchOptionAssignment` | Player's team and role in an option |
 | `RoomPlayer` | Player assigned to draft room with team/role/captain status |
 
@@ -109,11 +109,30 @@ The lobby system enables 10-player team drafts with role-based matchmaking.
 
 Located in `internal/service/matchmaking_service.go`:
 
+Uses a **multi-algorithm approach** to generate diverse, high-quality team options:
+
 1. Load all 10 players' role profiles (MMR + comfort per role)
-2. Generate C(10,5) = 252 team combinations
-3. For each split, find optimal role assignments via permutation
-4. Calculate balance score: `100 - (mmrDiff/100) - (comfortPenalty * 1.5)`
-5. Return top 5 options sorted by balance score
+2. Generate C(10,5) = 252 team splits
+3. For each split, try all 120 × 120 = 14,400 role permutations (both teams optimized)
+4. Score each composition with 4 different algorithms
+5. Return top 8 unique options (2 best from each algorithm, deduplicated)
+
+**Scoring Algorithms** (`AlgorithmType`):
+
+| Algorithm | Focus | Best For |
+|-----------|-------|----------|
+| `mmr_balanced` | Minimize team MMR difference | Competitive games with similar skill players |
+| `role_comfort` | Maximize player comfort ratings | Games where players want their main roles |
+| `hybrid` | Balance MMR and comfort equally | General-purpose matchmaking |
+| `lane_balanced` | Minimize worst lane matchup | Wide skill range lobbies (prevents stomps) |
+
+**Scoring Details**:
+- `mmr_balanced`: Heavy penalty for MMR diff, light comfort penalty
+- `role_comfort`: Heavy comfort penalty (exponential), light MMR penalty
+- `hybrid`: Balanced penalties for both factors
+- `lane_balanced`: Penalizes max single-lane MMR gap to prevent unfair matchups
+
+When MMR range > 1000, `lane_balanced` is prioritized in final sorting.
 
 ### Lobby API Endpoints
 
@@ -221,6 +240,9 @@ Uses **Playwright** with page objects and multi-user fixtures.
 
 ## Recent Improvements
 
+- **Multi-Algorithm Matchmaking**: 4 specialized algorithms (MMR balanced, role comfort, hybrid, lane balanced) generate diverse team options
+- **Red Team Permutation Fix**: Now tries all 120×120 role permutations for both teams instead of only permuting blue
+- **Algorithm UI Badges**: Match options display algorithm type badge and key metrics (MMR diff, avg comfort, max lane gap)
 - **Request/Response Logging**: API client logs all requests with full URLs and response status
 - **WebSocket Error Logging**: Connection errors and message handling logged for debugging
 - **Auth Error Logging**: Authentication middleware logs all auth failures

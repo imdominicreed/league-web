@@ -56,12 +56,16 @@ type LobbyPlayerResponse struct {
 }
 
 type MatchOptionResponse struct {
-	OptionNumber   int                         `json:"optionNumber"`
-	BlueTeamAvgMMR int                         `json:"blueTeamAvgMmr"`
-	RedTeamAvgMMR  int                         `json:"redTeamAvgMmr"`
-	MMRDifference  int                         `json:"mmrDifference"`
-	BalanceScore   float64                     `json:"balanceScore"`
-	Assignments    []AssignmentResponse        `json:"assignments"`
+	OptionNumber   int                  `json:"optionNumber"`
+	AlgorithmType  string               `json:"algorithmType"`
+	BlueTeamAvgMMR int                  `json:"blueTeamAvgMmr"`
+	RedTeamAvgMMR  int                  `json:"redTeamAvgMmr"`
+	MMRDifference  int                  `json:"mmrDifference"`
+	BalanceScore   float64              `json:"balanceScore"`
+	AvgBlueComfort float64              `json:"avgBlueComfort"`
+	AvgRedComfort  float64              `json:"avgRedComfort"`
+	MaxLaneDiff    int                  `json:"maxLaneDiff"`
+	Assignments    []AssignmentResponse `json:"assignments"`
 }
 
 type AssignmentResponse struct {
@@ -310,7 +314,7 @@ func (h *LobbyHandler) GenerateTeams(w http.ResponseWriter, r *http.Request) {
 		players[i] = &lobby.Players[i]
 	}
 
-	options, err := h.matchmakingService.GenerateMatchOptions(r.Context(), lobbyID, players, 5)
+	options, err := h.matchmakingService.GenerateMatchOptions(r.Context(), lobbyID, players, 8)
 	if err != nil {
 		log.Printf("ERROR [lobby.GenerateTeams] failed to generate teams: %v", err)
 		http.Error(w, "Failed to generate teams", http.StatusInternalServerError)
@@ -526,10 +530,14 @@ func toMatchOptionResponse(opt *domain.MatchOption) MatchOptionResponse {
 
 	return MatchOptionResponse{
 		OptionNumber:   opt.OptionNumber,
+		AlgorithmType:  string(opt.AlgorithmType),
 		BlueTeamAvgMMR: opt.BlueTeamAvgMMR,
 		RedTeamAvgMMR:  opt.RedTeamAvgMMR,
 		MMRDifference:  opt.MMRDifference,
 		BalanceScore:   opt.BalanceScore,
+		AvgBlueComfort: opt.AvgBlueComfort,
+		AvgRedComfort:  opt.AvgRedComfort,
+		MaxLaneDiff:    opt.MaxLaneDiff,
 		Assignments:    assignments,
 	}
 }

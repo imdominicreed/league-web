@@ -143,12 +143,32 @@ export interface LobbyPlayer {
   isReady: boolean
 }
 
+export type AlgorithmType = 'mmr_balanced' | 'role_comfort' | 'hybrid' | 'lane_balanced'
+
+export const ALGORITHM_LABELS: Record<AlgorithmType, string> = {
+  mmr_balanced: 'Most Balanced',
+  role_comfort: 'Best Role Fit',
+  hybrid: 'Balanced Overall',
+  lane_balanced: 'Fair Lanes',
+}
+
+export const ALGORITHM_DESCRIPTIONS: Record<AlgorithmType, string> = {
+  mmr_balanced: 'Teams have closest total MMR',
+  role_comfort: 'Players get their preferred roles',
+  hybrid: 'Balances MMR and role comfort',
+  lane_balanced: 'No single lane is outmatched',
+}
+
 export interface MatchOption {
   optionNumber: number
+  algorithmType: AlgorithmType
   blueTeamAvgMmr: number
   redTeamAvgMmr: number
   mmrDifference: number
   balanceScore: number
+  avgBlueComfort: number
+  avgRedComfort: number
+  maxLaneDiff: number
   assignments: MatchAssignment[]
 }
 
