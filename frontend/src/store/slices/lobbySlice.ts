@@ -156,6 +156,13 @@ export const proposeMatchmake = createAsyncThunk(
   }
 )
 
+export const proposeSelectOption = createAsyncThunk(
+  'lobby/proposeSelectOption',
+  async ({ lobbyId, optionNumber }: { lobbyId: string; optionNumber: number }) => {
+    return await lobbyApi.proposeSelectOption(lobbyId, optionNumber)
+  }
+)
+
 export const proposeStartDraft = createAsyncThunk(
   'lobby/proposeStartDraft',
   async (lobbyId: string) => {
@@ -395,6 +402,19 @@ const lobbySlice = createSlice({
       .addCase(proposeMatchmake.rejected, (state, action) => {
         state.proposingAction = false
         state.error = action.error.message || 'Failed to propose matchmake'
+      })
+      // Propose select option
+      .addCase(proposeSelectOption.pending, (state) => {
+        state.proposingAction = true
+        state.error = null
+      })
+      .addCase(proposeSelectOption.fulfilled, (state, action) => {
+        state.proposingAction = false
+        state.pendingAction = action.payload
+      })
+      .addCase(proposeSelectOption.rejected, (state, action) => {
+        state.proposingAction = false
+        state.error = action.error.message || 'Failed to propose option selection'
       })
       // Propose start draft
       .addCase(proposeStartDraft.pending, (state) => {

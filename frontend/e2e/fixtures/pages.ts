@@ -311,6 +311,119 @@ export class LobbyRoomPage {
     const teamText = side === 'blue' ? 'Blue Team' : 'Red Team';
     await expect(this.page.locator(`text=${teamText}`)).toBeVisible();
   }
+
+  // ========== Captain Modal Methods ==========
+
+  async clickPromoteCaptain() {
+    await this.page.click('button:has-text("Promote Captain")');
+  }
+
+  async clickKickPlayer() {
+    await this.page.click('button:has-text("Kick Player")');
+  }
+
+  async clickProposeSwap() {
+    await this.page.click('button:has-text("Propose Swap")');
+  }
+
+  async selectPlayerInModal(displayName: string) {
+    // Click a player button in promote/kick modal
+    await this.page.click(`button:has-text("${displayName}")`);
+  }
+
+  async cancelModal() {
+    // Click Cancel button to close any open modal
+    // Use last() since there may be multiple Cancel buttons (modal + controls)
+    const cancelButtons = this.page.locator('button:has-text("Cancel")');
+    const count = await cancelButtons.count();
+    if (count > 0) {
+      await cancelButtons.last().click();
+    }
+  }
+
+  // ========== Swap Modal Configuration ==========
+
+  async selectSwapType(type: 'players' | 'roles') {
+    if (type === 'players') {
+      await this.page.click('button:has-text("Between Teams")');
+    } else {
+      await this.page.click('button:has-text("Swap Roles")');
+    }
+  }
+
+  async selectPlayer1InSwap(displayName: string) {
+    // First select dropdown - find option containing the display name
+    const select1 = this.page.locator('select').first();
+    const options = await select1.locator('option').allTextContents();
+    const matchingOption = options.find((opt) => opt.includes(displayName));
+    if (matchingOption) {
+      await select1.selectOption({ label: matchingOption });
+    }
+  }
+
+  async selectPlayer2InSwap(displayName: string) {
+    // Second select dropdown - find option containing the display name
+    const select2 = this.page.locator('select').nth(1);
+    const options = await select2.locator('option').allTextContents();
+    const matchingOption = options.find((opt) => opt.includes(displayName));
+    if (matchingOption) {
+      await select2.selectOption({ label: matchingOption });
+    }
+  }
+
+  async confirmSwapProposal() {
+    // Click Propose button inside the swap modal (modal has bg-lol-gold class)
+    const modal = this.page.locator('.fixed.inset-0.bg-black\\/70');
+    await modal.locator('button.bg-lol-gold:has-text("Propose")').click();
+  }
+
+  // ========== Pending Action Verification ==========
+
+  async expectNoPendingActionBanner() {
+    await expect(this.page.locator('.bg-yellow-900\\/30')).not.toBeVisible();
+  }
+
+  async getPendingActionType(): Promise<string> {
+    const label = this.page.locator('.bg-yellow-900\\/30 .text-yellow-400.font-semibold');
+    return (await label.textContent()) || '';
+  }
+
+  async expectApproveButton() {
+    await expect(this.page.locator('button:has-text("Approve")')).toBeVisible();
+  }
+
+  async expectApprovedBadge() {
+    await expect(this.page.locator('.text-green-400:has-text("Approved")')).toBeVisible();
+  }
+
+  // ========== Player Verification ==========
+
+  async expectPlayerOnTeam(displayName: string, team: 'blue' | 'red') {
+    const teamSection = team === 'blue'
+      ? this.page.locator('.bg-blue-900\\/30, [class*="blue"]').first()
+      : this.page.locator('.bg-red-900\\/30, [class*="red"]').first();
+    await expect(teamSection.locator(`text=${displayName}`)).toBeVisible();
+  }
+
+  async expectPlayerNotInLobby(displayName: string) {
+    // Check specifically in the team column containers (not match options)
+    // TeamColumn root has bg-blue-900/30 or bg-red-900/30 with an h3 header
+    // MatchOptionCard has h4 headers, so we specifically target TeamColumn
+    const blueTeamColumn = this.page.locator('.bg-blue-900\\/30').filter({ has: this.page.locator('h3') });
+    const redTeamColumn = this.page.locator('.bg-red-900\\/30').filter({ has: this.page.locator('h3') });
+
+    // Check both team columns don't contain the player name
+    await expect(blueTeamColumn.locator(`text=${displayName}`)).not.toBeVisible();
+    await expect(redTeamColumn.locator(`text=${displayName}`)).not.toBeVisible();
+  }
+
+  async expectCaptainControls() {
+    await expect(this.page.locator('text=Captain Controls')).toBeVisible();
+  }
+
+  async expectPlayerActions() {
+    await expect(this.page.locator('text=Player Actions')).toBeVisible();
+  }
 }
 
 /**

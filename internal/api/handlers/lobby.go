@@ -332,8 +332,16 @@ func (h *LobbyHandler) GenerateTeams(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if lobby.CreatedBy != userID {
-		http.Error(w, "Only lobby creator can generate teams", http.StatusForbidden)
+	// Verify user is a captain
+	var isCaptain bool
+	for _, p := range lobby.Players {
+		if p.UserID == userID && p.IsCaptain {
+			isCaptain = true
+			break
+		}
+	}
+	if !isCaptain {
+		http.Error(w, "Only captain can generate teams", http.StatusForbidden)
 		return
 	}
 
@@ -411,8 +419,12 @@ func (h *LobbyHandler) SelectOption(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.lobbyService.SelectMatchOption(r.Context(), lobbyID, req.OptionNumber, userID); err != nil {
-		if errors.Is(err, service.ErrNotLobbyCreator) {
-			http.Error(w, "Only lobby creator can select teams", http.StatusForbidden)
+		if errors.Is(err, service.ErrNotCaptain) {
+			http.Error(w, "Only captain can select teams", http.StatusForbidden)
+			return
+		}
+		if errors.Is(err, service.ErrNotInLobby) {
+			http.Error(w, "User not in lobby", http.StatusForbidden)
 			return
 		}
 		if errors.Is(err, service.ErrInvalidMatchOption) {
@@ -455,8 +467,12 @@ func (h *LobbyHandler) StartDraft(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Lobby not found", http.StatusNotFound)
 			return
 		}
-		if errors.Is(err, service.ErrNotLobbyCreator) {
-			http.Error(w, "Only lobby creator can start draft", http.StatusForbidden)
+		if errors.Is(err, service.ErrNotCaptain) {
+			http.Error(w, "Only captain can start draft", http.StatusForbidden)
+			return
+		}
+		if errors.Is(err, service.ErrNotInLobby) {
+			http.Error(w, "User not in lobby", http.StatusForbidden)
 			return
 		}
 		if errors.Is(err, service.ErrInvalidLobbyState) {
@@ -756,6 +772,54 @@ func (h *LobbyHandler) ProposeStartDraft(w http.ResponseWriter, r *http.Request)
 		}
 		log.Printf("ERROR [lobby.ProposeStartDraft] failed: %v", err)
 		http.Error(w, "Failed to propose start draft", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(toPendingActionResponse(action))
+}
+
+func (h *LobbyHandler) ProposeSelectOption(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	lobbyID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid lobby ID", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		OptionNumber int `json:"optionNumber"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	action, err := h.lobbyService.ProposeSelectOption(r.Context(), lobbyID, userID, req.OptionNumber)
+	if err != nil {
+		if errors.Is(err, service.ErrNotCaptain) {
+			http.Error(w, "Only captain can propose option selection", http.StatusForbidden)
+			return
+		}
+		if errors.Is(err, service.ErrPendingActionExists) {
+			http.Error(w, "A pending action already exists", http.StatusConflict)
+			return
+		}
+		if errors.Is(err, service.ErrInvalidMatchOption) {
+			http.Error(w, "Invalid match option", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, service.ErrInvalidLobbyState) {
+			http.Error(w, "Lobby must be in matchmaking status", http.StatusConflict)
+			return
+		}
+		log.Printf("ERROR [lobby.ProposeSelectOption] failed: %v", err)
+		http.Error(w, "Failed to propose option selection", http.StatusInternalServerError)
 		return
 	}
 

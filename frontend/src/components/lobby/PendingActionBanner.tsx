@@ -15,7 +15,8 @@ interface PendingActionBannerProps {
 const ACTION_LABELS: Record<string, string> = {
   swap_players: 'Swap Players Between Teams',
   swap_roles: 'Swap Roles Within Team',
-  matchmake: 'Auto-Matchmake Teams',
+  matchmake: 'Generate Team Options',
+  select_option: 'Select Team Composition',
   start_draft: 'Start Draft',
 }
 
@@ -50,7 +51,11 @@ export function PendingActionBanner({
           ? `Swap roles between ${player1.displayName} and ${player2.displayName}`
           : 'Swap roles within team'
       case 'matchmake':
-        return 'Run auto-matchmaking to generate balanced teams'
+        return 'Generate balanced team options using matchmaking'
+      case 'select_option':
+        return action.matchOptionNum !== undefined
+          ? `Select team composition option #${action.matchOptionNum}`
+          : 'Select a team composition'
       case 'start_draft':
         return 'Start the champion draft'
       default:

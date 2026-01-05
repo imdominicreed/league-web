@@ -57,6 +57,9 @@ export const lobbyApi = {
   proposeMatchmake: (lobbyId: string): Promise<PendingAction> =>
     api.post(`/lobbies/${lobbyId}/propose-matchmake`),
 
+  proposeSelectOption: (lobbyId: string, optionNumber: number): Promise<PendingAction> =>
+    api.post(`/lobbies/${lobbyId}/propose-select-option`, { optionNumber }),
+
   proposeStartDraft: (lobbyId: string): Promise<PendingAction> =>
     api.post(`/lobbies/${lobbyId}/propose-start-draft`),
 

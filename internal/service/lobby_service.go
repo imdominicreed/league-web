@@ -38,13 +38,14 @@ var (
 )
 
 type LobbyService struct {
-	lobbyRepo         repository.LobbyRepository
-	lobbyPlayerRepo   repository.LobbyPlayerRepository
-	matchOptionRepo   repository.MatchOptionRepository
-	profileRepo       repository.UserRoleProfileRepository
-	roomPlayerRepo    repository.RoomPlayerRepository
-	pendingActionRepo repository.PendingActionRepository
-	roomService       *RoomService
+	lobbyRepo          repository.LobbyRepository
+	lobbyPlayerRepo    repository.LobbyPlayerRepository
+	matchOptionRepo    repository.MatchOptionRepository
+	profileRepo        repository.UserRoleProfileRepository
+	roomPlayerRepo     repository.RoomPlayerRepository
+	pendingActionRepo  repository.PendingActionRepository
+	roomService        *RoomService
+	matchmakingService *MatchmakingService
 }
 
 func NewLobbyService(
@@ -55,15 +56,17 @@ func NewLobbyService(
 	roomPlayerRepo repository.RoomPlayerRepository,
 	pendingActionRepo repository.PendingActionRepository,
 	roomService *RoomService,
+	matchmakingService *MatchmakingService,
 ) *LobbyService {
 	return &LobbyService{
-		lobbyRepo:         lobbyRepo,
-		lobbyPlayerRepo:   lobbyPlayerRepo,
-		matchOptionRepo:   matchOptionRepo,
-		profileRepo:       profileRepo,
-		roomPlayerRepo:    roomPlayerRepo,
-		pendingActionRepo: pendingActionRepo,
-		roomService:       roomService,
+		lobbyRepo:          lobbyRepo,
+		lobbyPlayerRepo:    lobbyPlayerRepo,
+		matchOptionRepo:    matchOptionRepo,
+		profileRepo:        profileRepo,
+		roomPlayerRepo:     roomPlayerRepo,
+		pendingActionRepo:  pendingActionRepo,
+		roomService:        roomService,
+		matchmakingService: matchmakingService,
 	}
 }
 
@@ -293,7 +296,7 @@ func (s *LobbyService) GetMatchOptions(ctx context.Context, lobbyID uuid.UUID) (
 	return s.matchOptionRepo.GetByLobbyID(ctx, lobbyID)
 }
 
-func (s *LobbyService) SelectMatchOption(ctx context.Context, lobbyID uuid.UUID, optionNumber int, creatorID uuid.UUID) error {
+func (s *LobbyService) SelectMatchOption(ctx context.Context, lobbyID uuid.UUID, optionNumber int, userID uuid.UUID) error {
 	lobby, err := s.lobbyRepo.GetByID(ctx, lobbyID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -302,8 +305,16 @@ func (s *LobbyService) SelectMatchOption(ctx context.Context, lobbyID uuid.UUID,
 		return err
 	}
 
-	if lobby.CreatedBy != creatorID {
-		return ErrNotLobbyCreator
+	// Verify user is a captain
+	player, err := s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, lobbyID, userID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrNotInLobby
+		}
+		return err
+	}
+	if !player.IsCaptain {
+		return ErrNotCaptain
 	}
 
 	if lobby.Status != domain.LobbyStatusMatchmaking {
@@ -360,9 +371,16 @@ func (s *LobbyService) StartDraft(ctx context.Context, lobbyID uuid.UUID, userID
 		return nil, err
 	}
 
-	// Verify user is the lobby creator
-	if lobby.CreatedBy != userID {
-		return nil, ErrNotLobbyCreator
+	// Verify user is a captain
+	player, err := s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, lobbyID, userID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotInLobby
+		}
+		return nil, err
+	}
+	if !player.IsCaptain {
+		return nil, ErrNotCaptain
 	}
 
 	// Verify lobby status is team_selected
@@ -793,6 +811,54 @@ func (s *LobbyService) ProposeStartDraft(ctx context.Context, lobbyID, captainID
 	return action, nil
 }
 
+// ProposeSelectOption creates a pending action to select a match option
+func (s *LobbyService) ProposeSelectOption(ctx context.Context, lobbyID, captainID uuid.UUID, optionNumber int) (*domain.PendingAction, error) {
+	lobby, err := s.lobbyRepo.GetByID(ctx, lobbyID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrLobbyNotFound
+		}
+		return nil, err
+	}
+
+	if lobby.Status != domain.LobbyStatusMatchmaking {
+		return nil, ErrInvalidLobbyState
+	}
+
+	// Verify the option exists
+	_, err = s.matchOptionRepo.GetByLobbyIDAndNumber(ctx, lobbyID, optionNumber)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrInvalidMatchOption
+		}
+		return nil, err
+	}
+
+	// Check for existing pending action
+	existing, _ := s.pendingActionRepo.GetPendingByLobbyID(ctx, lobbyID)
+	if existing != nil && !existing.IsExpired() {
+		return nil, ErrPendingActionExists
+	}
+
+	// Verify the caller is a captain
+	captain, err := s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, lobbyID, captainID)
+	if err != nil {
+		return nil, err
+	}
+	if !captain.IsCaptain || captain.Team == nil {
+		return nil, ErrNotCaptain
+	}
+
+	action := domain.NewPendingAction(lobbyID, captainID, *captain.Team, domain.PendingActionSelectOption)
+	action.MatchOptionNum = &optionNumber
+
+	if err := s.pendingActionRepo.Create(ctx, action); err != nil {
+		return nil, err
+	}
+
+	return action, nil
+}
+
 // ApprovePendingAction approves a pending action by the other captain
 func (s *LobbyService) ApprovePendingAction(ctx context.Context, lobbyID, captainID, actionID uuid.UUID) error {
 	action, err := s.pendingActionRepo.GetByID(ctx, actionID)
@@ -911,15 +977,101 @@ func (s *LobbyService) executePendingAction(ctx context.Context, action *domain.
 	case domain.PendingActionSwapRoles:
 		return s.executeSwapRoles(ctx, action)
 	case domain.PendingActionMatchmake:
-		// Matchmake is handled separately - this just marks it as approved
-		// The actual matchmaking happens when approved
-		return nil
+		return s.executeMatchmaking(ctx, action.LobbyID)
+	case domain.PendingActionSelectOption:
+		if action.MatchOptionNum == nil {
+			return ErrInvalidMatchOption
+		}
+		return s.applyMatchOption(ctx, action.LobbyID, *action.MatchOptionNum)
 	case domain.PendingActionStartDraft:
-		// StartDraft is handled separately after approval
+		// StartDraft is now handled directly by any captain
 		return nil
 	default:
 		return ErrInvalidLobbyState
 	}
+}
+
+// executeMatchmaking runs the matchmaking algorithm and updates lobby status
+func (s *LobbyService) executeMatchmaking(ctx context.Context, lobbyID uuid.UUID) error {
+	lobby, err := s.lobbyRepo.GetByID(ctx, lobbyID)
+	if err != nil {
+		return err
+	}
+
+	if lobby.Status != domain.LobbyStatusWaitingForPlayers {
+		return ErrInvalidLobbyState
+	}
+
+	// Get players and verify readiness
+	players, err := s.lobbyPlayerRepo.GetByLobbyID(ctx, lobbyID)
+	if err != nil {
+		return err
+	}
+
+	if len(players) != 10 {
+		return ErrNotEnoughPlayers
+	}
+
+	for _, p := range players {
+		if !p.IsReady {
+			return ErrPlayersNotReady
+		}
+	}
+
+	// Generate match options
+	_, err = s.matchmakingService.GenerateMatchOptions(ctx, lobbyID, players, 8)
+	if err != nil {
+		return err
+	}
+
+	// Update lobby status to matchmaking
+	lobby.Status = domain.LobbyStatusMatchmaking
+	return s.lobbyRepo.Update(ctx, lobby)
+}
+
+// applyMatchOption applies the selected match option to the lobby
+func (s *LobbyService) applyMatchOption(ctx context.Context, lobbyID uuid.UUID, optionNumber int) error {
+	lobby, err := s.lobbyRepo.GetByID(ctx, lobbyID)
+	if err != nil {
+		return err
+	}
+
+	if lobby.Status != domain.LobbyStatusMatchmaking {
+		return ErrInvalidLobbyState
+	}
+
+	// Verify the option exists
+	option, err := s.matchOptionRepo.GetByLobbyIDAndNumber(ctx, lobbyID, optionNumber)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrInvalidMatchOption
+		}
+		return err
+	}
+
+	// Update lobby players with team assignments
+	assignments := make(map[uuid.UUID]struct {
+		Team domain.Side
+		Role domain.Role
+	})
+	for _, a := range option.Assignments {
+		assignments[a.UserID] = struct {
+			Team domain.Side
+			Role domain.Role
+		}{
+			Team: a.Team,
+			Role: a.AssignedRole,
+		}
+	}
+
+	if err := s.lobbyPlayerRepo.UpdateTeamAssignments(ctx, lobbyID, assignments); err != nil {
+		return err
+	}
+
+	// Update lobby status
+	lobby.SelectedMatchOption = &optionNumber
+	lobby.Status = domain.LobbyStatusTeamSelected
+	return s.lobbyRepo.Update(ctx, lobby)
 }
 
 func (s *LobbyService) executeSwapPlayers(ctx context.Context, action *domain.PendingAction) error {

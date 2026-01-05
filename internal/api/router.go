@@ -102,6 +102,7 @@ func NewRouter(services *service.Services, hub *websocket.Hub, repos *repository
 				// Pending actions
 				r.Post("/{id}/swap", lobbyHandler.ProposeSwap)
 				r.Post("/{id}/propose-matchmake", lobbyHandler.ProposeMatchmake)
+				r.Post("/{id}/propose-select-option", lobbyHandler.ProposeSelectOption)
 				r.Post("/{id}/propose-start-draft", lobbyHandler.ProposeStartDraft)
 				r.Get("/{id}/pending-action", lobbyHandler.GetPendingAction)
 				r.Post("/{id}/pending-action/{actionId}/approve", lobbyHandler.ApprovePendingAction)

@@ -145,7 +145,7 @@ export interface LobbyPlayer {
   joinOrder: number
 }
 
-export type PendingActionType = 'swap_players' | 'swap_roles' | 'matchmake' | 'start_draft'
+export type PendingActionType = 'swap_players' | 'swap_roles' | 'matchmake' | 'select_option' | 'start_draft'
 export type PendingActionStatus = 'pending' | 'approved' | 'cancelled' | 'expired'
 
 export interface PendingAction {
@@ -156,6 +156,7 @@ export interface PendingAction {
   proposedBySide: Side
   player1Id?: string
   player2Id?: string
+  matchOptionNum?: number
   approvedByBlue: boolean
   approvedByRed: boolean
   expiresAt: string

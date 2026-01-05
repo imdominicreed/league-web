@@ -10,10 +10,11 @@ import (
 type PendingActionType string
 
 const (
-	PendingActionSwapPlayers PendingActionType = "swap_players"
-	PendingActionSwapRoles   PendingActionType = "swap_roles"
-	PendingActionMatchmake   PendingActionType = "matchmake"
-	PendingActionStartDraft  PendingActionType = "start_draft"
+	PendingActionSwapPlayers  PendingActionType = "swap_players"
+	PendingActionSwapRoles    PendingActionType = "swap_roles"
+	PendingActionMatchmake    PendingActionType = "matchmake"
+	PendingActionSelectOption PendingActionType = "select_option"
+	PendingActionStartDraft   PendingActionType = "start_draft"
 )
 
 // PendingActionStatus represents the status of a pending action

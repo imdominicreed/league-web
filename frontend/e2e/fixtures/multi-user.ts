@@ -268,3 +268,180 @@ export async function getLobby(session: UserSession, lobbyId: string): Promise<L
   const client = new ApiClient(session.token);
   return client.get<Lobby>(`/lobbies/${lobbyId}`);
 }
+
+// ========== Captain Management Helpers ==========
+
+/**
+ * Take captain status from current captain
+ */
+export async function takeCaptain(session: UserSession, lobbyId: string): Promise<Lobby> {
+  const client = new ApiClient(session.token);
+  return client.post<Lobby>(`/lobbies/${lobbyId}/take-captain`);
+}
+
+/**
+ * Promote a teammate to captain
+ */
+export async function promoteCaptain(
+  session: UserSession,
+  lobbyId: string,
+  targetUserId: string
+): Promise<Lobby> {
+  const client = new ApiClient(session.token);
+  return client.post<Lobby>(`/lobbies/${lobbyId}/promote-captain`, { userId: targetUserId });
+}
+
+/**
+ * Kick a player from the lobby
+ */
+export async function kickPlayer(
+  session: UserSession,
+  lobbyId: string,
+  targetUserId: string
+): Promise<Lobby> {
+  const client = new ApiClient(session.token);
+  return client.post<Lobby>(`/lobbies/${lobbyId}/kick`, { userId: targetUserId });
+}
+
+// ========== Pending Action Helpers ==========
+
+export interface PendingAction {
+  id: string;
+  actionType: 'swap_players' | 'swap_roles' | 'matchmake' | 'start_draft';
+  status: 'pending' | 'approved' | 'cancelled' | 'expired';
+  proposedByUser: string;
+  proposedBySide: 'blue' | 'red';
+  player1Id?: string;
+  player2Id?: string;
+  approvedByBlue: boolean;
+  approvedByRed: boolean;
+  expiresAt: string;
+}
+
+/**
+ * Propose a player or role swap
+ */
+export async function proposeSwap(
+  session: UserSession,
+  lobbyId: string,
+  player1Id: string,
+  player2Id: string,
+  swapType: 'players' | 'roles'
+): Promise<PendingAction> {
+  const client = new ApiClient(session.token);
+  return client.post<PendingAction>(`/lobbies/${lobbyId}/swap`, {
+    player1Id,
+    player2Id,
+    swapType,
+  });
+}
+
+/**
+ * Get current pending action (if any)
+ */
+export async function getPendingAction(
+  session: UserSession,
+  lobbyId: string
+): Promise<PendingAction | null> {
+  const client = new ApiClient(session.token);
+  try {
+    return await client.get<PendingAction>(`/lobbies/${lobbyId}/pending-action`);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Approve a pending action
+ */
+export async function approvePendingAction(
+  session: UserSession,
+  lobbyId: string,
+  actionId: string
+): Promise<Lobby> {
+  const client = new ApiClient(session.token);
+  return client.post<Lobby>(`/lobbies/${lobbyId}/pending-action/${actionId}/approve`);
+}
+
+/**
+ * Cancel a pending action
+ */
+export async function cancelPendingAction(
+  session: UserSession,
+  lobbyId: string,
+  actionId: string
+): Promise<Lobby> {
+  const client = new ApiClient(session.token);
+  return client.post<Lobby>(`/lobbies/${lobbyId}/pending-action/${actionId}/cancel`);
+}
+
+// ========== Advanced Fixtures ==========
+
+/**
+ * Helper to create a lobby with 10 users in waiting_for_players status.
+ * Teams are auto-assigned as players join (first 5 to blue, next 5 to red).
+ * This is suitable for testing captain management actions (take, promote, kick, swap).
+ */
+export async function setupLobbyWithPlayers(
+  createUsers: (count: number) => Promise<UserSession[]>
+): Promise<LobbyWithUsers> {
+  const users = await createUsers(10);
+
+  // Creator creates lobby (auto-joins as blue captain)
+  const creatorClient = new ApiClient(users[0].token);
+  const lobby = await creatorClient.post<Lobby>('/lobbies', {
+    draftMode: 'pro_play',
+    timerDurationSeconds: 30,
+  });
+
+  // Other users join sequentially to ensure proper team assignment order
+  // (Blue: users 0-4, Red: users 5-9)
+  for (const user of users.slice(1)) {
+    const client = new ApiClient(user.token);
+    await client.post(`/lobbies/${lobby.id}/join`);
+  }
+
+  // Fetch the updated lobby state
+  const updatedLobby = await creatorClient.get<Lobby>(`/lobbies/${lobby.id}`);
+
+  return { lobby: updatedLobby, users };
+}
+
+/**
+ * Helper to create a lobby with 10 users and teams already selected.
+ * This creates users, creates lobby, all join, all ready, generates teams, selects option 1.
+ * Use this for testing swap workflows that require pending action approval.
+ */
+export async function setupLobbyWithTeams(
+  createUsers: (count: number) => Promise<UserSession[]>
+): Promise<LobbyWithUsers> {
+  const users = await createUsers(10);
+
+  // Creator creates lobby
+  const creatorClient = new ApiClient(users[0].token);
+  const lobby = await creatorClient.post<Lobby>('/lobbies', {
+    draftMode: 'pro_play',
+    timerDurationSeconds: 30,
+  });
+
+  // All other users join in parallel
+  await Promise.all(
+    users.slice(1).map((user) => {
+      const client = new ApiClient(user.token);
+      return client.post(`/lobbies/${lobby.id}/join`);
+    })
+  );
+
+  // All users ready up in parallel
+  await Promise.all(
+    users.map((user) => setUserReady(user, lobby.id, true))
+  );
+
+  // Generate teams
+  await generateTeams(users[0], lobby.id);
+
+  // Select first option
+  const updatedLobby = await selectMatchOption(users[0], lobby.id, 1);
+
+  return { lobby: updatedLobby, users };
+}

@@ -17,6 +17,11 @@ type Services struct {
 
 func NewServices(repos *repository.Repositories, cfg *config.Config) *Services {
 	roomService := NewRoomService(repos.Room, repos.DraftState)
+	matchmakingService := NewMatchmakingService(
+		repos.UserRoleProfile,
+		repos.MatchOption,
+		repos.Lobby,
+	)
 
 	return &Services{
 		Auth:     NewAuthService(repos.User, repos.Session, cfg),
@@ -32,11 +37,8 @@ func NewServices(repos *repository.Repositories, cfg *config.Config) *Services {
 			repos.RoomPlayer,
 			repos.PendingAction,
 			roomService,
+			matchmakingService,
 		),
-		Matchmaking: NewMatchmakingService(
-			repos.UserRoleProfile,
-			repos.MatchOption,
-			repos.Lobby,
-		),
+		Matchmaking: matchmakingService,
 	}
 }

@@ -6,14 +6,13 @@ import {
   fetchLobby,
   fetchMatchOptions,
   setReady,
-  generateTeams,
-  selectMatchOption,
   startDraft,
   takeCaptain,
   promoteCaptain,
   kickPlayer,
   proposeSwap,
   proposeMatchmake,
+  proposeSelectOption,
   proposeStartDraft,
   fetchPendingAction,
   approvePendingAction,
@@ -38,8 +37,6 @@ export default function LobbyRoom() {
     teamStats,
     loading,
     error,
-    generatingTeams,
-    selectingOption,
     startingDraft,
     createdRoom,
     takingCaptain,
@@ -52,7 +49,6 @@ export default function LobbyRoom() {
   } = useSelector((state: RootState) => state.lobby)
   const { user } = useSelector((state: RootState) => state.auth)
 
-  const [selectedOption, setSelectedOption] = useState<number | null>(null)
   const [pollInterval, setPollInterval] = useState<ReturnType<typeof setInterval> | null>(null)
 
   // Polling for lobby state
@@ -146,22 +142,15 @@ export default function LobbyRoom() {
     }
   }, [lobby, pendingAction, dispatch])
 
-  const handleGenerateTeams = useCallback(() => {
-    if (lobby) dispatch(generateTeams(lobby.id))
-  }, [lobby, dispatch])
-
-  const handleSelectOption = useCallback(() => {
-    if (lobby && selectedOption) {
-      dispatch(selectMatchOption({ lobbyId: lobby.id, optionNumber: selectedOption }))
+  const handleProposeSelectOption = useCallback((optionNumber: number) => {
+    if (lobby) {
+      dispatch(proposeSelectOption({ lobbyId: lobby.id, optionNumber }))
     }
-  }, [lobby, selectedOption, dispatch])
+  }, [lobby, dispatch])
 
   const handleStartDraft = useCallback(() => {
     if (lobby) dispatch(startDraft(lobby.id))
   }, [lobby, dispatch])
-
-  const isCreator = lobby?.createdBy === user?.id
-  const allReady = lobby?.players.length === 10 && lobby.players.every(p => p.isReady)
 
   if (loading && !lobby) {
     return <div className="min-h-screen flex items-center justify-center text-gray-400">Loading...</div>
@@ -259,54 +248,41 @@ export default function LobbyRoom() {
           />
         )}
 
-        {/* Generate Teams for Creator */}
-        {lobby.status === 'waiting_for_players' && isCreator && allReady && (
-          <div className="mt-6 text-center">
-            <button
-              onClick={handleGenerateTeams}
-              disabled={generatingTeams}
-              className="bg-lol-gold text-black font-semibold py-3 px-8 rounded-lg hover:bg-opacity-80 transition disabled:opacity-50"
-            >
-              {generatingTeams ? 'Generating Teams...' : 'Generate Team Options (Creator Only)'}
-            </button>
-          </div>
-        )}
-
         {/* Match Options Selection */}
         {(lobby.status === 'matchmaking' || lobby.status === 'team_selected') && matchOptions && (
           <div className="space-y-6 mt-8">
-            <h2 className="text-xl font-semibold text-white">Select Team Composition</h2>
+            <h2 className="text-xl font-semibold text-white">
+              {lobby.status === 'matchmaking' ? 'Select Team Composition' : 'Selected Team Composition'}
+            </h2>
+            <p className="text-gray-400 text-sm">
+              {isCaptain && lobby.status === 'matchmaking'
+                ? 'Click on an option to propose it. The other captain must approve.'
+                : lobby.status === 'matchmaking'
+                  ? 'Waiting for a captain to propose a team composition...'
+                  : ''}
+            </p>
             <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
               {matchOptions.map(opt => (
                 <MatchOptionCard
                   key={opt.optionNumber}
                   option={opt}
-                  isSelected={selectedOption === opt.optionNumber || lobby.selectedMatchOption === opt.optionNumber}
-                  onSelect={isCreator && lobby.status === 'matchmaking' ? () => setSelectedOption(opt.optionNumber) : undefined}
-                  disabled={!isCreator || lobby.status === 'team_selected'}
+                  isSelected={lobby.selectedMatchOption === opt.optionNumber}
+                  onSelect={isCaptain && lobby.status === 'matchmaking' && !proposingAction
+                    ? () => handleProposeSelectOption(opt.optionNumber)
+                    : undefined}
+                  disabled={!isCaptain || lobby.status === 'team_selected' || proposingAction}
                 />
               ))}
             </div>
-            {isCreator && lobby.status === 'matchmaking' && selectedOption && (
-              <div className="text-center">
-                <button
-                  onClick={handleSelectOption}
-                  disabled={selectingOption}
-                  className="bg-lol-gold text-black font-semibold py-3 px-8 rounded-lg hover:bg-opacity-80 transition disabled:opacity-50"
-                >
-                  {selectingOption ? 'Confirming...' : 'Confirm Selection'}
-                </button>
-              </div>
-            )}
-            {/* Start Draft for Creator */}
-            {isCreator && lobby.status === 'team_selected' && (
+            {/* Start Draft for Captain */}
+            {isCaptain && lobby.status === 'team_selected' && (
               <div className="text-center">
                 <button
                   onClick={handleStartDraft}
                   disabled={startingDraft}
                   className="bg-green-600 text-white font-semibold py-3 px-8 rounded-lg hover:bg-green-500 transition disabled:opacity-50"
                 >
-                  {startingDraft ? 'Starting Draft...' : 'Start Draft (Creator Only)'}
+                  {startingDraft ? 'Starting Draft...' : 'Start Draft'}
                 </button>
               </div>
             )}
