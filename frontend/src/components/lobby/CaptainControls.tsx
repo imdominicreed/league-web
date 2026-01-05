@@ -202,7 +202,7 @@ export function CaptainControls({
                 >
                   <option value="">Select player...</option>
                   {allPlayers.map(p => (
-                    <option key={p.id} value={p.id}>
+                    <option key={p.userId} value={p.userId}>
                       {p.displayName} ({p.team})
                     </option>
                   ))}
@@ -217,8 +217,8 @@ export function CaptainControls({
                   className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white"
                 >
                   <option value="">Select player...</option>
-                  {allPlayers.filter(p => p.id !== selectedPlayer1).map(p => (
-                    <option key={p.id} value={p.id}>
+                  {allPlayers.filter(p => p.userId !== selectedPlayer1).map(p => (
+                    <option key={p.userId} value={p.userId}>
                       {p.displayName} ({p.team})
                     </option>
                   ))}

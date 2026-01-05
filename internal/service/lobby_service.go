@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	mathrand "math/rand"
+	"strings"
 	"time"
 
 	"github.com/dom/league-draft-website/internal/domain"
@@ -122,8 +123,8 @@ func (s *LobbyService) GetLobby(ctx context.Context, idOrCode string) (*domain.L
 	if id, err := uuid.Parse(idOrCode); err == nil {
 		return s.lobbyRepo.GetByID(ctx, id)
 	}
-	// Otherwise treat as short code
-	return s.lobbyRepo.GetByShortCode(ctx, idOrCode)
+	// Otherwise treat as short code (normalize to uppercase)
+	return s.lobbyRepo.GetByShortCode(ctx, strings.ToUpper(idOrCode))
 }
 
 func (s *LobbyService) JoinLobby(ctx context.Context, lobbyID, userID uuid.UUID) (*domain.LobbyPlayer, error) {
@@ -494,7 +495,7 @@ func findCaptain(assignments []domain.MatchOptionAssignment) *domain.MatchOption
 func generateLobbyShortCode() string {
 	bytes := make([]byte, 4)
 	rand.Read(bytes)
-	return hex.EncodeToString(bytes)[:8]
+	return strings.ToUpper(hex.EncodeToString(bytes)[:8])
 }
 
 // ==================== Captain Management ====================

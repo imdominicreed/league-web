@@ -76,8 +76,36 @@ export default function ChampionGrid({ onSelect, onLockIn, onHover, isYourTurn, 
     )
   }
 
+  const isBanning = draft.actionType === 'ban'
+  const isPicking = draft.actionType === 'pick'
+
   return (
     <div className="flex-1 flex flex-col min-h-0 p-6">
+
+      {/* Phase & Turn Indicator Banner */}
+      {(isBanning || isPicking) && (
+        <div className={`mb-4 rounded-lg border-2 p-3 text-center ${
+          isBanning
+            ? 'bg-red-900/30 border-red-700'
+            : 'bg-blue-900/30 border-blue-700'
+        }`}>
+          <div className={`font-beaufort text-xl uppercase tracking-widest font-bold ${
+            isBanning ? 'text-red-400' : 'text-blue-400'
+          }`}>
+            {isBanning ? '🚫 Banning Phase' : '⚔️ Picking Phase'}
+          </div>
+          <div className={`mt-1 text-sm font-semibold ${
+            isYourTurn
+              ? 'text-lol-gold'
+              : 'text-gray-400'
+          }`}>
+            {isYourTurn
+              ? `Your turn to ${isBanning ? 'BAN' : 'PICK'}`
+              : `Waiting for ${draft.currentTeam === 'blue' ? 'Blue' : 'Red'} team...`
+            }
+          </div>
+        </div>
+      )}
 
       {/* Filters - Compact Row */}
       <div className="mb-2 flex gap-2 items-center">

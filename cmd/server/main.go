@@ -23,6 +23,7 @@ func main() {
 	}
 
 	// Initialize database
+	print(cfg.DatabaseURL)
 	db, err := postgres.NewConnection(cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("failed to connect to database: %v", err)
@@ -32,7 +33,7 @@ func main() {
 	repos := postgres.NewRepositories(db)
 
 	// Initialize WebSocket hub
-	hub := websocket.NewHub(repos.User, repos.RoomPlayer)
+	hub := websocket.NewHub(repos.User, repos.RoomPlayer, repos.Champion)
 	go hub.Run()
 
 	// Initialize services

@@ -17,6 +17,7 @@ type Hub struct {
 	joinRoom       chan *JoinRoomRequest
 	userRepo       repository.UserRepository
 	roomPlayerRepo repository.RoomPlayerRepository
+	championRepo   repository.ChampionRepository
 	mu             sync.RWMutex
 }
 
@@ -26,7 +27,7 @@ type JoinRoomRequest struct {
 	Side   string
 }
 
-func NewHub(userRepo repository.UserRepository, roomPlayerRepo repository.RoomPlayerRepository) *Hub {
+func NewHub(userRepo repository.UserRepository, roomPlayerRepo repository.RoomPlayerRepository, championRepo repository.ChampionRepository) *Hub {
 	return &Hub{
 		rooms:          make(map[string]*Room),
 		clients:        make(map[*Client]bool),
@@ -35,6 +36,7 @@ func NewHub(userRepo repository.UserRepository, roomPlayerRepo repository.RoomPl
 		joinRoom:       make(chan *JoinRoomRequest),
 		userRepo:       userRepo,
 		roomPlayerRepo: roomPlayerRepo,
+		championRepo:   championRepo,
 	}
 }
 
@@ -124,7 +126,7 @@ func (h *Hub) CreateRoom(roomID uuid.UUID, shortCode string, timerDurationMs int
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	room := NewRoom(roomID, shortCode, timerDurationMs, h.userRepo)
+	room := NewRoom(roomID, shortCode, timerDurationMs, h.userRepo, h.championRepo)
 	h.rooms[roomID.String()] = room
 	h.rooms[shortCode] = room
 

@@ -440,11 +440,12 @@ test.describe('Swap Player Tests (Between Teams)', () => {
     expect(redNonCaptain).toBeDefined();
 
     // Propose swap via API for speed
+    // Note: Backend expects userId, not LobbyPlayer.id
     await proposeSwap(
       blueCaptainUser!,
       lobby.id,
-      blueNonCaptain!.id,
-      redNonCaptain!.id,
+      blueNonCaptain!.userId,
+      redNonCaptain!.userId,
       'players'
     );
 
@@ -492,11 +493,12 @@ test.describe('Swap Player Tests (Between Teams)', () => {
     const redNonCaptain = findNonCaptainOnTeam(lobby.players, 'red');
 
     // Propose swap via API
+    // Note: Backend expects userId, not LobbyPlayer.id
     const pendingAction = await proposeSwap(
       blueCaptainUser!,
       lobby.id,
-      blueNonCaptain!.id,
-      redNonCaptain!.id,
+      blueNonCaptain!.userId,
+      redNonCaptain!.userId,
       'players'
     );
 
@@ -532,11 +534,12 @@ test.describe('Swap Player Tests (Between Teams)', () => {
     const redNonCaptain = findNonCaptainOnTeam(lobby.players, 'red');
 
     // Propose swap via API
+    // Note: Backend expects userId, not LobbyPlayer.id
     await proposeSwap(
       blueCaptainUser!,
       lobby.id,
-      blueNonCaptain!.id,
-      redNonCaptain!.id,
+      blueNonCaptain!.userId,
+      redNonCaptain!.userId,
       'players'
     );
 
@@ -574,11 +577,12 @@ test.describe('Swap Player Tests (Between Teams)', () => {
     const redNonCaptain = findNonCaptainOnTeam(lobby.players, 'red');
 
     // Propose swap via API
+    // Note: Backend expects userId, not LobbyPlayer.id
     await proposeSwap(
       blueCaptainUser!,
       lobby.id,
-      blueNonCaptain!.id,
-      redNonCaptain!.id,
+      blueNonCaptain!.userId,
+      redNonCaptain!.userId,
       'players'
     );
 
@@ -629,11 +633,12 @@ test.describe('Swap Role Tests (Within Team)', () => {
     expect(blueTeammates.length).toBeGreaterThanOrEqual(2);
 
     // Propose role swap via API
+    // Note: Backend expects userId, not LobbyPlayer.id
     await proposeSwap(
       blueCaptainUser!,
       lobby.id,
-      blueTeammates[0].id,
-      blueTeammates[1].id,
+      blueTeammates[0].userId,
+      blueTeammates[1].userId,
       'roles'
     );
 
@@ -667,11 +672,12 @@ test.describe('Swap Role Tests (Within Team)', () => {
     const player2Role = blueTeammates[1].assignedRole;
 
     // Propose role swap via API
+    // Note: Backend expects userId, not LobbyPlayer.id
     const pendingAction = await proposeSwap(
       blueCaptainUser!,
       lobby.id,
-      blueTeammates[0].id,
-      blueTeammates[1].id,
+      blueTeammates[0].userId,
+      blueTeammates[1].userId,
       'roles'
     );
 

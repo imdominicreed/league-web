@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -21,6 +22,7 @@ type Room struct {
 	spectators      map[*Client]bool
 	timerDurationMs int
 	userRepo        repository.UserRepository
+	championRepo    repository.ChampionRepository
 
 	// Team draft mode (5v5)
 	isTeamDraft      bool
@@ -77,7 +79,7 @@ type ReadyRequest struct {
 	Ready  bool
 }
 
-func NewRoom(id uuid.UUID, shortCode string, timerDurationMs int, userRepo repository.UserRepository) *Room {
+func NewRoom(id uuid.UUID, shortCode string, timerDurationMs int, userRepo repository.UserRepository, championRepo repository.ChampionRepository) *Room {
 	return &Room{
 		id:               id,
 		shortCode:        shortCode,
@@ -87,6 +89,7 @@ func NewRoom(id uuid.UUID, shortCode string, timerDurationMs int, userRepo repos
 		redTeamClients:   make(map[*Client]bool),
 		timerDurationMs:  timerDurationMs,
 		userRepo:         userRepo,
+		championRepo:     championRepo,
 		draftState: &DraftState{
 			CurrentPhase: 0,
 			BlueBans:     []string{},
@@ -544,15 +547,16 @@ func (r *Room) handleTimerExpired() {
 		return
 	}
 
-	// // Auto-select random available champion
-	// // For now, just skip (in production, pick random)
-	// msg, _ := NewMessage(MessageTypeTimerExpired, TimerExpiredPayload{
-	// 	Phase:        r.draftState.CurrentPhase,
-	// 	AutoSelected: nil,
-	// })
-	// r.broadcastMessageLocked(msg)
-	// Apply the selection
-	championID := "None"
+	var championID string
+
+	if phase.ActionType == domain.ActionTypeBan {
+		// Missed ban - use "None" (skip the ban)
+		championID = "None"
+	} else {
+		// Missed pick - select a random available champion
+		championID = r.getRandomAvailableChampion()
+	}
+
 	r.applySelection(phase, championID)
 
 	// Stop current timer
@@ -568,7 +572,6 @@ func (r *Room) handleTimerExpired() {
 		ChampionID: championID,
 	})
 	r.broadcastMessageLocked(msg)
-
 
 	r.advancePhase()
 }
@@ -650,6 +653,36 @@ func (r *Room) isChampionUsed(championID string) bool {
 		}
 	}
 	return false
+}
+
+// getRandomAvailableChampion returns a random champion that hasn't been picked or banned
+func (r *Room) getRandomAvailableChampion() string {
+	if r.championRepo == nil {
+		log.Printf("Warning: championRepo is nil, cannot get random champion")
+		return "None"
+	}
+
+	champions, err := r.championRepo.GetAll(context.Background())
+	if err != nil {
+		log.Printf("Error getting champions: %v", err)
+		return "None"
+	}
+
+	// Filter out used champions
+	var available []string
+	for _, c := range champions {
+		if !r.isChampionUsed(c.ID) {
+			available = append(available, c.ID)
+		}
+	}
+
+	if len(available) == 0 {
+		log.Printf("Warning: no available champions for random pick")
+		return "None"
+	}
+
+	// Pick a random one
+	return available[rand.Intn(len(available))]
 }
 
 func (r *Room) broadcastMessage(msg *Message) {

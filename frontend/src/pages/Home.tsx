@@ -42,6 +42,12 @@ export default function Home() {
             >
               Create 10-Man Lobby
             </Link>
+            <Link
+              to="/join-lobby"
+              className="bg-transparent border-2 border-purple-500 text-purple-400 font-semibold py-3 px-6 rounded-lg text-center hover:bg-purple-500 hover:text-white transition"
+            >
+              Join 10-Man Lobby
+            </Link>
           </>
         ) : (
           <>

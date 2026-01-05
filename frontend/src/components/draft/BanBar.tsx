@@ -74,7 +74,13 @@ export default function BanBar({ blueBans, redBans, isBlueActive, isRedActive }:
         </div>
 
         {/* Timer Center */}
-        <div className="text-center px-4">
+        <div className={`text-center px-6 py-2 rounded-lg ${
+          isWaiting || isComplete
+            ? ''
+            : isBanning
+            ? 'bg-red-900/40 border border-red-700'
+            : 'bg-blue-900/40 border border-blue-700'
+        }`}>
           {isWaiting ? (
             <div className="font-beaufort text-lol-gold text-sm uppercase tracking-wider">
               Waiting
@@ -85,6 +91,11 @@ export default function BanBar({ blueBans, redBans, isBlueActive, isRedActive }:
             </div>
           ) : (
             <>
+              <div className={`font-beaufort text-sm uppercase tracking-widest font-bold mb-1 ${
+                isBanning ? 'text-red-400' : 'text-blue-400'
+              }`}>
+                {isBanning ? 'BAN' : 'PICK'}
+              </div>
               <div
                 className={`font-beaufort text-3xl font-bold ${
                   isCritical ? 'text-red-team animate-pulse' : isLow ? 'text-yellow-500' : 'text-lol-gold'
@@ -92,10 +103,10 @@ export default function BanBar({ blueBans, redBans, isBlueActive, isRedActive }:
               >
                 {seconds}
               </div>
-              <div className={`text-xs uppercase tracking-wider ${
+              <div className={`text-sm uppercase tracking-wider font-semibold ${
                 currentTeam === 'blue' ? 'text-blue-team' : 'text-red-team'
               }`}>
-                {currentTeam === 'blue' ? 'Blue' : 'Red'} {actionType === 'ban' ? 'Ban' : 'Pick'}
+                {currentTeam === 'blue' ? 'Blue' : 'Red'} Team
               </div>
             </>
           )}

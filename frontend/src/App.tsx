@@ -11,6 +11,7 @@ import JoinDraft from './pages/JoinDraft'
 import DraftRoom from './pages/DraftRoom'
 import Profile from './pages/Profile'
 import CreateLobby from './pages/CreateLobby'
+import JoinLobby from './pages/JoinLobby'
 import LobbyRoom from './pages/LobbyRoom'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -84,6 +85,22 @@ function App() {
           element={
             <ProtectedRoute>
               <CreateLobby />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/join-lobby"
+          element={
+            <ProtectedRoute>
+              <JoinLobby />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/join-lobby/:code"
+          element={
+            <ProtectedRoute>
+              <JoinLobby />
             </ProtectedRoute>
           }
         />
