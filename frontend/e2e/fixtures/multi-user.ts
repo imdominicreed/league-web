@@ -34,6 +34,8 @@ export interface LobbyPlayer {
   team: string | null;
   assignedRole: string | null;
   isReady: boolean;
+  isCaptain: boolean;
+  joinOrder: number;
 }
 
 export interface MatchOption {

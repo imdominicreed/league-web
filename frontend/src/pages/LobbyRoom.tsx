@@ -259,7 +259,7 @@ export default function LobbyRoom() {
           />
         )}
 
-        {/* Legacy Generate Teams for Creator (fallback) */}
+        {/* Generate Teams for Creator */}
         {lobby.status === 'waiting_for_players' && isCreator && allReady && (
           <div className="mt-6 text-center">
             <button
@@ -298,6 +298,7 @@ export default function LobbyRoom() {
                 </button>
               </div>
             )}
+            {/* Start Draft for Creator */}
             {isCreator && lobby.status === 'team_selected' && (
               <div className="text-center">
                 <button

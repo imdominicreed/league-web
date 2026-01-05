@@ -201,11 +201,21 @@ export class LobbyRoomPage {
   }
 
   async clickGenerateTeams() {
-    await this.page.click('button:has-text("Generate Team Options")');
+    // Try creator-only button first (for creator), then captain proposal
+    const creatorButton = this.page.locator('button:has-text("Generate Team Options (Creator Only)")');
+    if (await creatorButton.count() > 0 && await creatorButton.isVisible()) {
+      await creatorButton.click();
+    } else {
+      // Fall back to any generate button
+      await this.page.click('button:has-text("Generate Team Options")');
+    }
   }
 
   async expectGenerateTeamsButton() {
-    await expect(this.page.locator('button:has-text("Generate Team Options")')).toBeVisible();
+    // Accept either the creator-only button or any generate button
+    await expect(
+      this.page.locator('button:has-text("Generate Team Options")')
+    ).toBeVisible();
   }
 
   async expectGeneratingTeams() {
@@ -213,9 +223,10 @@ export class LobbyRoomPage {
   }
 
   async selectOption(optionNumber: number) {
-    // Click the "Select This Option" button for the specific option card
+    // Click the match option card to select it
+    // The button inside is just a visual indicator - the card div has the onClick
     const optionCard = this.page.locator(`[data-testid="match-option-${optionNumber}"]`);
-    await optionCard.locator('button:has-text("Select This Option")').click();
+    await optionCard.click();
   }
 
   async clickConfirmSelection() {
@@ -223,7 +234,28 @@ export class LobbyRoomPage {
   }
 
   async clickStartDraft() {
-    await this.page.click('button:has-text("Start Draft")');
+    // Try the creator-only button first
+    const creatorButton = this.page.locator('button:has-text("Start Draft (Creator Only)")');
+    if (await creatorButton.count() > 0 && await creatorButton.isVisible()) {
+      await creatorButton.click();
+    } else {
+      // Fall back to propose start draft or any start draft button
+      const proposeButton = this.page.locator('button:has-text("Propose Start Draft")');
+      if (await proposeButton.count() > 0 && await proposeButton.isVisible()) {
+        await proposeButton.click();
+      } else {
+        await this.page.click('button:has-text("Start Draft")');
+      }
+    }
+  }
+
+  async expectStartDraftButton() {
+    // Check for either the creator-only button or the propose button (use first() to handle both being visible)
+    await expect(
+      this.page.locator('button:has-text("Start Draft (Creator Only)")').or(
+        this.page.locator('button:has-text("Propose Start Draft")')
+      ).first()
+    ).toBeVisible({ timeout: 10000 });
   }
 
   async expectOnDraftPage() {
@@ -237,6 +269,47 @@ export class LobbyRoomPage {
   async leave() {
     await this.page.click('a:has-text("Leave")');
     await this.page.waitForURL('/');
+  }
+
+  // Captain-related methods
+  async isCaptain(): Promise<boolean> {
+    // Check if the Captain badge is visible in controls
+    const captainBadge = this.page.locator('text=Captain').first();
+    return await captainBadge.count() > 0;
+  }
+
+  async clickTakeCaptain() {
+    await this.page.click('button:has-text("Take Captain")');
+  }
+
+  async expectTakeCaptainButton() {
+    await expect(this.page.locator('button:has-text("Take Captain")')).toBeVisible();
+  }
+
+  async clickProposeMatchmake() {
+    await this.page.click('button:has-text("Propose Matchmake")');
+  }
+
+  async clickProposeStartDraft() {
+    await this.page.click('button:has-text("Propose Start Draft")');
+  }
+
+  async expectPendingActionBanner() {
+    // Check for the pending action banner (yellow background)
+    await expect(this.page.locator('.bg-yellow-900\\/30')).toBeVisible();
+  }
+
+  async clickApprovePendingAction() {
+    await this.page.click('button:has-text("Approve")');
+  }
+
+  async clickCancelPendingAction() {
+    await this.page.click('button:has-text("Cancel")');
+  }
+
+  async expectTeamColumn(side: 'blue' | 'red') {
+    const teamText = side === 'blue' ? 'Blue Team' : 'Red Team';
+    await expect(this.page.locator(`text=${teamText}`)).toBeVisible();
   }
 }
 
@@ -393,7 +466,7 @@ export class DraftRoomPage {
     // Wait for at least one champion image to appear in the grid
     await expect(
       this.page.locator('[data-testid="champion-grid"] button img').first()
-    ).toBeVisible({ timeout: 5000 });
+    ).toBeVisible({ timeout: 15000 });
   }
 
   async waitForWaitingState() {

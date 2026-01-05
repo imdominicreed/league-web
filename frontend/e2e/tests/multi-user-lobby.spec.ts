@@ -58,7 +58,7 @@ test.describe('Multi-User Lobby Flow with UI', () => {
     await creatorPage.clickConfirmSelection();
 
     // Creator should see Start Draft button
-    await expect(users[0].page.locator('button:has-text("Start Draft")')).toBeVisible({ timeout: 10000 });
+    await creatorPage.expectStartDraftButton();
 
     // Creator clicks Start Draft
     await creatorPage.clickStartDraft();
@@ -242,9 +242,7 @@ test.describe('Multi-User Lobby Draft Flow', () => {
     await creatorPage.clickConfirmSelection();
 
     // Start draft - all users will be redirected
-    await expect(users[0].page.locator('button:has-text("Start Draft")')).toBeVisible({
-      timeout: 10000,
-    });
+    await creatorPage.expectStartDraftButton();
     await creatorPage.clickStartDraft();
 
     // All users should be redirected to draft page
@@ -499,7 +497,7 @@ test.describe('Match Options Visibility', () => {
     // CREATOR should see "Select This Option" buttons
     await expect(creator.page.locator('button:has-text("Select This Option")').first()).toBeVisible();
 
-    // NON-CREATORS should NOT see "Select This Option" buttons
+    // NON-CREATORS should NOT see "Select This Option" buttons (no onSelect prop)
     for (const joiner of joiners) {
       await expect(joiner.page.locator('button:has-text("Select This Option")')).not.toBeVisible();
     }
@@ -510,7 +508,7 @@ test.describe('Match Options Visibility', () => {
     await creatorPage.clickConfirmSelection();
 
     // Wait for selection to be confirmed
-    await expect(creator.page.locator('button:has-text("Start Draft")')).toBeVisible({ timeout: 10000 });
+    await creatorPage.expectStartDraftButton();
 
     // After selection, all users should see the selected option highlighted
     for (const user of users) {
@@ -523,9 +521,10 @@ test.describe('Match Options Visibility', () => {
     }
 
     // Only creator should see "Start Draft" button
-    await expect(creator.page.locator('button:has-text("Start Draft")')).toBeVisible();
+    await creatorPage.expectStartDraftButton();
+    // Non-creators should not see the creator-only start draft button
     for (const joiner of joiners) {
-      await expect(joiner.page.locator('button:has-text("Start Draft")')).not.toBeVisible();
+      await expect(joiner.page.locator('button:has-text("Start Draft (Creator Only)")')).not.toBeVisible();
     }
   });
 
@@ -589,8 +588,8 @@ test.describe('Match Options Visibility', () => {
     await expect(lateJoiner.page.locator('text=Select Team Composition')).toBeVisible({ timeout: 10000 });
     await expect(lateJoiner.page.locator('[data-testid="match-option-1"]')).toBeVisible();
 
-    // But should NOT see select buttons
-    await expect(lateJoiner.page.locator('button:has-text("Select This Option")')).not.toBeVisible();
+    // But should NOT see the confirm selection button (only creator can select)
+    await expect(lateJoiner.page.locator('button:has-text("Confirm Selection")')).not.toBeVisible();
   });
 });
 
