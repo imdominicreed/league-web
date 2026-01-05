@@ -64,11 +64,14 @@ export function useWebSocket(roomId: string, side: string) {
           isCaptain: payload.isCaptain,
           isTeamDraft: payload.isTeamDraft,
           players: payload.players,
+          teamPlayers: payload.teamPlayers,
         })
         dispatch(syncState({
           ...payload.draft,
           yourSide: payload.yourSide,
           fearlessBans: payload.fearlessBans,
+          teamPlayers: payload.teamPlayers,
+          isTeamDraft: payload.isTeamDraft,
         }))
         dispatch(syncRoom({
           room: {

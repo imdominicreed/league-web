@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import { RootState, AppDispatch } from '@/store'
+import { LobbyPlayer } from '@/types'
 import {
   fetchLobby,
   fetchMatchOptions,
@@ -50,6 +51,10 @@ export default function LobbyRoom() {
   const { user } = useSelector((state: RootState) => state.auth)
 
   const [pollInterval, setPollInterval] = useState<ReturnType<typeof setInterval> | null>(null)
+
+  // Swap mode state
+  const [swapMode, setSwapMode] = useState(false)
+  const [selectedForSwap, setSelectedForSwap] = useState<string | null>(null)
 
   // Polling for lobby state
   useEffect(() => {
@@ -100,6 +105,7 @@ export default function LobbyRoom() {
   const isCaptain = currentPlayer?.isCaptain || false
   const isReady = currentPlayer?.isReady || false
   const hasTeams = lobby?.status === 'team_selected'
+  const isMatchmaking = lobby?.status === 'matchmaking'
 
   // Handlers
   const handleReady = useCallback((ready: boolean) => {
@@ -119,8 +125,57 @@ export default function LobbyRoom() {
   }, [lobby, dispatch])
 
   const handleProposeSwap = useCallback((player1Id: string, player2Id: string, swapType: 'players' | 'roles') => {
-    if (lobby) dispatch(proposeSwap({ lobbyId: lobby.id, player1Id, player2Id, swapType }))
+    if (lobby) {
+      dispatch(proposeSwap({ lobbyId: lobby.id, player1Id, player2Id, swapType }))
+      // Reset swap mode after proposing
+      setSwapMode(false)
+      setSelectedForSwap(null)
+    }
   }, [lobby, dispatch])
+
+  // Handle player click in swap mode
+  const handlePlayerClick = useCallback((player: LobbyPlayer) => {
+    if (!swapMode) return
+
+    if (!selectedForSwap) {
+      // First selection
+      setSelectedForSwap(player.id)
+    } else if (selectedForSwap === player.id) {
+      // Clicked same player, deselect
+      setSelectedForSwap(null)
+    } else {
+      // Second selection - auto-detect swap type and propose
+      const firstPlayer = lobby?.players.find(p => p.id === selectedForSwap)
+      const secondPlayer = player
+
+      if (!firstPlayer) {
+        setSelectedForSwap(null)
+        return
+      }
+
+      // Auto-detect swap type based on teams
+      const swapType = firstPlayer.team === secondPlayer.team ? 'roles' : 'players'
+      handleProposeSwap(firstPlayer.userId, secondPlayer.userId, swapType)
+    }
+  }, [swapMode, selectedForSwap, lobby?.players, handleProposeSwap])
+
+  // Cancel swap mode on Escape
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && swapMode) {
+        setSwapMode(false)
+        setSelectedForSwap(null)
+      }
+    }
+    window.addEventListener('keydown', handleEscape)
+    return () => window.removeEventListener('keydown', handleEscape)
+  }, [swapMode])
+
+  // Toggle swap mode handler
+  const handleToggleSwapMode = useCallback(() => {
+    setSwapMode(prev => !prev)
+    setSelectedForSwap(null)
+  }, [])
 
   const handleProposeMatchmake = useCallback(() => {
     if (lobby) dispatch(proposeMatchmake(lobby.id))
@@ -195,13 +250,17 @@ export default function LobbyRoom() {
         )}
 
         {/* Main Content - Two Column Layout */}
-        {(lobby.status === 'waiting_for_players' || lobby.status === 'team_selected') && (
+        {(lobby.status === 'waiting_for_players' || lobby.status === 'matchmaking' || lobby.status === 'team_selected') && (
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto_1fr] gap-6 mb-6">
             {/* Blue Team */}
             <TeamColumn
               side="blue"
               players={lobby.players}
               currentUserId={user?.id}
+              swapMode={swapMode}
+              selectedPlayerId={selectedForSwap}
+              pendingAction={pendingAction}
+              onPlayerClick={swapMode ? handlePlayerClick : undefined}
             />
 
             {/* Center Panel - Stats */}
@@ -220,7 +279,35 @@ export default function LobbyRoom() {
               side="red"
               players={lobby.players}
               currentUserId={user?.id}
+              swapMode={swapMode}
+              selectedPlayerId={selectedForSwap}
+              pendingAction={pendingAction}
+              onPlayerClick={swapMode ? handlePlayerClick : undefined}
             />
+          </div>
+        )}
+
+        {/* Swap Mode Banner */}
+        {swapMode && (
+          <div className="mb-6 bg-lol-gold/20 border border-lol-gold rounded-lg p-4 flex items-center justify-between">
+            <div>
+              <p className="text-lol-gold font-semibold">Swap Mode</p>
+              <p className="text-gray-300 text-sm">
+                {!selectedForSwap
+                  ? 'Click on any player to select them'
+                  : 'Now click another player to swap (same team = swap roles, different team = swap teams)'
+                }
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setSwapMode(false)
+                setSelectedForSwap(null)
+              }}
+              className="text-gray-400 hover:text-white px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition"
+            >
+              Cancel (Esc)
+            </button>
           </div>
         )}
 
@@ -232,11 +319,13 @@ export default function LobbyRoom() {
             currentUserSide={currentUserSide}
             isCaptain={isCaptain}
             hasTeams={hasTeams}
+            isMatchmaking={isMatchmaking}
             hasPendingAction={!!pendingAction && pendingAction.status === 'pending'}
+            swapMode={swapMode}
             onTakeCaptain={handleTakeCaptain}
             onPromoteCaptain={handlePromoteCaptain}
             onKickPlayer={handleKickPlayer}
-            onProposeSwap={handleProposeSwap}
+            onToggleSwapMode={handleToggleSwapMode}
             onProposeMatchmake={handleProposeMatchmake}
             onProposeStartDraft={handleProposeStartDraft}
             onSetReady={handleReady}

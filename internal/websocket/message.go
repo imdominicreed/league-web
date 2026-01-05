@@ -154,7 +154,8 @@ type PhaseChangedPayload struct {
 }
 
 type TimerTickPayload struct {
-	RemainingMs int `json:"remainingMs"`
+	RemainingMs    int  `json:"remainingMs"`
+	IsBufferPeriod bool `json:"isBufferPeriod"`
 }
 
 type TimerExpiredPayload struct {

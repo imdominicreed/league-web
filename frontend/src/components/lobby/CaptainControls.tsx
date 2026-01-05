@@ -7,11 +7,13 @@ interface CaptainControlsProps {
   currentUserSide: Side
   isCaptain: boolean
   hasTeams: boolean
+  isMatchmaking: boolean
   hasPendingAction: boolean
+  swapMode: boolean
   onTakeCaptain: () => void
   onPromoteCaptain: (userId: string) => void
   onKickPlayer: (userId: string) => void
-  onProposeSwap: (player1Id: string, player2Id: string, swapType: 'players' | 'roles') => void
+  onToggleSwapMode: () => void
   onProposeMatchmake: () => void
   onProposeStartDraft: () => void
   onSetReady: (ready: boolean) => void
@@ -28,11 +30,13 @@ export function CaptainControls({
   currentUserSide,
   isCaptain,
   hasTeams,
+  isMatchmaking,
   hasPendingAction,
+  swapMode,
   onTakeCaptain,
   onPromoteCaptain,
   onKickPlayer,
-  onProposeSwap,
+  onToggleSwapMode,
   onProposeMatchmake,
   onProposeStartDraft,
   onSetReady,
@@ -42,24 +46,10 @@ export function CaptainControls({
   kickingPlayer,
   proposingAction,
 }: CaptainControlsProps) {
-  const [showSwapModal, setShowSwapModal] = useState(false)
   const [showPromoteModal, setShowPromoteModal] = useState(false)
   const [showKickModal, setShowKickModal] = useState(false)
-  const [selectedPlayer1, setSelectedPlayer1] = useState<string | null>(null)
-  const [selectedPlayer2, setSelectedPlayer2] = useState<string | null>(null)
-  const [swapType, setSwapType] = useState<'players' | 'roles'>('players')
 
   const teamPlayers = players.filter(p => p.team === currentUserSide && p.userId !== currentUserId)
-  const allPlayers = players.filter(p => p.userId !== currentUserId)
-
-  const handleSwapConfirm = () => {
-    if (selectedPlayer1 && selectedPlayer2) {
-      onProposeSwap(selectedPlayer1, selectedPlayer2, swapType)
-      setShowSwapModal(false)
-      setSelectedPlayer1(null)
-      setSelectedPlayer2(null)
-    }
-  }
 
   const allReady = hasTeams && players.length === 10 && players.every(p => p.isReady)
 
@@ -127,15 +117,19 @@ export function CaptainControls({
 
               {/* Swap */}
               <button
-                onClick={() => setShowSwapModal(true)}
-                disabled={proposingAction || hasPendingAction || players.length < 2}
-                className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50"
+                onClick={onToggleSwapMode}
+                disabled={!swapMode && (proposingAction || hasPendingAction || players.length < 2)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                  swapMode
+                    ? 'bg-lol-gold text-black'
+                    : 'bg-gray-700 hover:bg-gray-600 text-white disabled:opacity-50'
+                }`}
               >
-                Propose Swap
+                {swapMode ? 'Cancel Swap' : 'Swap'}
               </button>
 
-              {/* Matchmake */}
-              {!hasTeams && (
+              {/* Matchmake - only in waiting_for_players state */}
+              {!hasTeams && !isMatchmaking && (
                 <button
                   onClick={onProposeMatchmake}
                   disabled={proposingAction || hasPendingAction || players.length < 10}
@@ -159,91 +153,6 @@ export function CaptainControls({
           )}
         </div>
       </div>
-
-      {/* Swap Modal */}
-      {showSwapModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-          <div className="bg-gray-900 border border-gray-700 rounded-lg p-6 max-w-md w-full mx-4">
-            <h3 className="text-lg font-semibold text-white mb-4">Propose Swap</h3>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm text-gray-400 mb-2">Swap Type</label>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setSwapType('players')}
-                    className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition ${
-                      swapType === 'players'
-                        ? 'bg-lol-blue text-white'
-                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                    }`}
-                  >
-                    Between Teams
-                  </button>
-                  <button
-                    onClick={() => setSwapType('roles')}
-                    className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition ${
-                      swapType === 'roles'
-                        ? 'bg-lol-blue text-white'
-                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                    }`}
-                  >
-                    Swap Roles
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm text-gray-400 mb-2">Player 1</label>
-                <select
-                  value={selectedPlayer1 || ''}
-                  onChange={e => setSelectedPlayer1(e.target.value || null)}
-                  className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white"
-                >
-                  <option value="">Select player...</option>
-                  {allPlayers.map(p => (
-                    <option key={p.userId} value={p.userId}>
-                      {p.displayName} ({p.team})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm text-gray-400 mb-2">Player 2</label>
-                <select
-                  value={selectedPlayer2 || ''}
-                  onChange={e => setSelectedPlayer2(e.target.value || null)}
-                  className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white"
-                >
-                  <option value="">Select player...</option>
-                  {allPlayers.filter(p => p.userId !== selectedPlayer1).map(p => (
-                    <option key={p.userId} value={p.userId}>
-                      {p.displayName} ({p.team})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="flex gap-2 mt-6">
-              <button
-                onClick={() => setShowSwapModal(false)}
-                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg font-medium transition"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSwapConfirm}
-                disabled={!selectedPlayer1 || !selectedPlayer2}
-                className="flex-1 bg-lol-gold text-black py-2 rounded-lg font-medium transition disabled:opacity-50"
-              >
-                Propose
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Promote Modal */}
       {showPromoteModal && (

@@ -687,7 +687,23 @@ func (h *LobbyHandler) ProposeSwap(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if errors.Is(err, service.ErrInvalidSwap) {
-			http.Error(w, "Invalid swap request", http.StatusBadRequest)
+			http.Error(w, "Invalid swap request: for 'Between Teams' swap, players must be on different teams; for 'Swap Roles', players must be on the same team", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, service.ErrPlayerNotFound) {
+			http.Error(w, "Player not found in lobby", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, service.ErrNotInLobby) {
+			http.Error(w, "You are not in this lobby", http.StatusForbidden)
+			return
+		}
+		if errors.Is(err, service.ErrInvalidLobbyState) {
+			http.Error(w, "Cannot propose swap: draft has already started", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, service.ErrLobbyNotFound) {
+			http.Error(w, "Lobby not found", http.StatusNotFound)
 			return
 		}
 		log.Printf("ERROR [lobby.ProposeSwap] failed: %v", err)

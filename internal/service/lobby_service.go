@@ -350,6 +350,11 @@ func (s *LobbyService) SelectMatchOption(ctx context.Context, lobbyID uuid.UUID,
 		return err
 	}
 
+	// Reset captains after team reassignment - one captain per team based on join order
+	if err := s.resetCaptainsAfterTeamAssignment(ctx, lobbyID); err != nil {
+		return err
+	}
+
 	// Update lobby status
 	lobby.SelectedMatchOption = &optionNumber
 	lobby.Status = domain.LobbyStatusTeamSelected
@@ -490,29 +495,6 @@ func (s *LobbyService) StartDraft(ctx context.Context, lobbyID uuid.UUID, userID
 	return room, nil
 }
 
-// findCaptain returns the first player (captain) from a team based on role order
-func findCaptain(assignments []domain.MatchOptionAssignment) *domain.MatchOptionAssignment {
-	if len(assignments) == 0 {
-		return nil
-	}
-	// Role order: Top -> Jungle -> Mid -> ADC -> Support
-	roleOrder := map[domain.Role]int{
-		domain.RoleTop:     0,
-		domain.RoleJungle:  1,
-		domain.RoleMid:     2,
-		domain.RoleADC:     3,
-		domain.RoleSupport: 4,
-	}
-
-	captain := &assignments[0]
-	for i := range assignments {
-		if roleOrder[assignments[i].AssignedRole] < roleOrder[captain.AssignedRole] {
-			captain = &assignments[i]
-		}
-	}
-	return captain
-}
-
 func generateLobbyShortCode() string {
 	bytes := make([]byte, 4)
 	rand.Read(bytes)
@@ -520,6 +502,47 @@ func generateLobbyShortCode() string {
 }
 
 // ==================== Captain Management ====================
+
+// resetCaptainsAfterTeamAssignment ensures exactly one captain per team after matchmaking
+// The player with lowest join order on each team becomes captain
+func (s *LobbyService) resetCaptainsAfterTeamAssignment(ctx context.Context, lobbyID uuid.UUID) error {
+	players, err := s.lobbyPlayerRepo.GetByLobbyID(ctx, lobbyID)
+	if err != nil {
+		return err
+	}
+
+	// Find first player (by join order) on each team
+	var blueCaptain, redCaptain *domain.LobbyPlayer
+	for _, p := range players {
+		if p.Team == nil {
+			continue
+		}
+		if *p.Team == domain.SideBlue {
+			if blueCaptain == nil || p.JoinOrder < blueCaptain.JoinOrder {
+				blueCaptain = p
+			}
+		} else if *p.Team == domain.SideRed {
+			if redCaptain == nil || p.JoinOrder < redCaptain.JoinOrder {
+				redCaptain = p
+			}
+		}
+	}
+
+	// Update all players - clear captain status then set the correct ones
+	for _, p := range players {
+		shouldBeCaptain := (blueCaptain != nil && p.ID == blueCaptain.ID) ||
+			(redCaptain != nil && p.ID == redCaptain.ID)
+
+		if p.IsCaptain != shouldBeCaptain {
+			p.IsCaptain = shouldBeCaptain
+			if err := s.lobbyPlayerRepo.Update(ctx, p); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
 
 // TakeCaptain allows any player to take captain status from current captain
 func (s *LobbyService) TakeCaptain(ctx context.Context, lobbyID, userID uuid.UUID) error {
@@ -682,6 +705,7 @@ type SwapRequest struct {
 }
 
 // ProposeSwap creates a pending action to swap players between teams or roles within a team
+// Allowed in: waiting_for_players, matchmaking, team_selected (not during drafting or completed)
 func (s *LobbyService) ProposeSwap(ctx context.Context, lobbyID, captainID uuid.UUID, req SwapRequest) (*domain.PendingAction, error) {
 	lobby, err := s.lobbyRepo.GetByID(ctx, lobbyID)
 	if err != nil {
@@ -691,7 +715,10 @@ func (s *LobbyService) ProposeSwap(ctx context.Context, lobbyID, captainID uuid.
 		return nil, err
 	}
 
-	if lobby.Status != domain.LobbyStatusWaitingForPlayers {
+	// Allow swaps before draft starts
+	if lobby.Status != domain.LobbyStatusWaitingForPlayers &&
+		lobby.Status != domain.LobbyStatusMatchmaking &&
+		lobby.Status != domain.LobbyStatusTeamSelected {
 		return nil, ErrInvalidLobbyState
 	}
 
@@ -704,6 +731,9 @@ func (s *LobbyService) ProposeSwap(ctx context.Context, lobbyID, captainID uuid.
 	// Verify the caller is a captain
 	captain, err := s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, lobbyID, captainID)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotInLobby
+		}
 		return nil, err
 	}
 	if !captain.IsCaptain || captain.Team == nil {
@@ -1079,6 +1109,11 @@ func (s *LobbyService) applyMatchOption(ctx context.Context, lobbyID uuid.UUID, 
 		return err
 	}
 
+	// Reset captains after team reassignment - one captain per team based on join order
+	if err := s.resetCaptainsAfterTeamAssignment(ctx, lobbyID); err != nil {
+		return err
+	}
+
 	// Update lobby status
 	lobby.SelectedMatchOption = &optionNumber
 	lobby.Status = domain.LobbyStatusTeamSelected
@@ -1214,9 +1249,11 @@ func (s *LobbyService) executeSwapPlayers(ctx context.Context, action *domain.Pe
 		return err
 	}
 
-	// Swap teams and captain status together
+	// Swap teams, roles, and captain status together
 	// (captain status stays with the team position, not the person)
+	// (roles are swapped so the team compositions stay balanced)
 	player1.Team, player2.Team = player2.Team, player1.Team
+	player1.AssignedRole, player2.AssignedRole = player2.AssignedRole, player1.AssignedRole
 	player1.IsCaptain, player2.IsCaptain = player2.IsCaptain, player1.IsCaptain
 
 	if err := s.lobbyPlayerRepo.Update(ctx, player1); err != nil {

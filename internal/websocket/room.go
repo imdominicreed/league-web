@@ -13,6 +13,8 @@ import (
 	"github.com/google/uuid"
 )
 
+const bufferDurationMs = 5000 // 5 second buffer after timer hits 0
+
 type Room struct {
 	id              uuid.UUID
 	shortCode       string
@@ -498,7 +500,9 @@ func (r *Room) handleStartDraft(client *Client) {
 func (r *Room) startTimer() {
 	r.timerStartedAt = time.Now()
 
-	r.timer = time.AfterFunc(time.Duration(r.timerDurationMs)*time.Millisecond, func() {
+	// Timer fires after main duration + buffer period
+	totalDuration := r.timerDurationMs + bufferDurationMs
+	r.timer = time.AfterFunc(time.Duration(totalDuration)*time.Millisecond, func() {
 		r.handleTimerExpired()
 	})
 
@@ -519,17 +523,25 @@ func (r *Room) runTimerTicker() {
 
 		elapsed := time.Since(r.timerStartedAt)
 		remaining := r.timerDurationMs - int(elapsed.Milliseconds())
-		if remaining < 0 {
-			remaining = 0
+
+		// Check if we're in the buffer period (past main timer but before auto-lock)
+		isBufferPeriod := remaining <= 0
+
+		// Display 0 during buffer period (don't show negative)
+		displayRemaining := remaining
+		if displayRemaining < 0 {
+			displayRemaining = 0
 		}
 		r.mu.RUnlock()
 
 		msg, _ := NewMessage(MessageTypeTimerTick, TimerTickPayload{
-			RemainingMs: remaining,
+			RemainingMs:    displayRemaining,
+			IsBufferPeriod: isBufferPeriod,
 		})
 		r.broadcast <- msg
 
-		if remaining <= 0 {
+		// Stop ticker after buffer period expires
+		if remaining <= -bufferDurationMs {
 			return
 		}
 	}

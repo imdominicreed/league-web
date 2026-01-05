@@ -10,6 +10,7 @@ interface DraftSliceState extends DraftState {
   fearlessBans: string[]
   teamPlayers: TeamPlayer[]
   isTeamDraft: boolean
+  isBufferPeriod: boolean
 }
 
 const initialState: DraftSliceState = {
@@ -30,6 +31,7 @@ const initialState: DraftSliceState = {
   fearlessBans: [],
   teamPlayers: [],
   isTeamDraft: false,
+  isBufferPeriod: false,
 }
 
 const draftSlice = createSlice({
@@ -73,9 +75,11 @@ const draftSlice = createSlice({
       state.actionType = action.payload.actionType as 'ban' | 'pick'
       state.timerRemainingMs = action.payload.timerRemainingMs
       state.hoveredChampion = { blue: null, red: null }
+      state.isBufferPeriod = false
     },
-    updateTimer: (state, action: PayloadAction<{ remainingMs: number }>) => {
+    updateTimer: (state, action: PayloadAction<{ remainingMs: number; isBufferPeriod?: boolean }>) => {
       state.timerRemainingMs = action.payload.remainingMs
+      state.isBufferPeriod = action.payload.isBufferPeriod ?? false
     },
     championHovered: (state, action: PayloadAction<{ side: string; championId: string | null }>) => {
       if (action.payload.side === 'blue') {

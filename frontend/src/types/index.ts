@@ -232,6 +232,7 @@ export interface StateSyncPayload {
   yourSide: Side
   isCaptain: boolean
   isTeamDraft: boolean
+  teamPlayers?: TeamPlayer[]
   spectatorCount: number
   fearlessBans?: string[]
 }

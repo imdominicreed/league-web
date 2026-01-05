@@ -68,8 +68,8 @@ export default function TeamPanel({ side, player, picks, isActive, hoveredChampi
           isCurrentPick ? 'ring-2 ring-inset ring-lol-gold animate-pulse' : ''
         } ${isCaptainRow ? 'ring-1 ring-inset ring-lol-gold/50' : ''}`}
       >
-        {/* Role and Player Info overlay for team draft */}
-        {isTeamDraft && role && (
+        {/* Role and Player Info overlay */}
+        {role && (
           <div className="absolute top-0 left-0 right-0 z-10 flex items-center gap-1 px-1.5 py-0.5 bg-black/60">
             <span className={`text-xs font-bold ${side === 'blue' ? 'text-blue-team' : 'text-red-team'}`}>
               {ROLE_ABBREVIATIONS[role]}
@@ -158,10 +158,11 @@ export default function TeamPanel({ side, player, picks, isActive, hoveredChampi
             return renderPickSlot(slotIndex, championId, role, teamPlayer)
           })
         ) : (
-          // Original 1v1 mode: Show 5 pick slots without roles
-          [0, 1, 2, 3, 4].map((i) => {
-            const championId = picks[i]
-            return renderPickSlot(i, championId)
+          // 1v1 mode: Show 5 pick slots with role indicators
+          ALL_ROLES.map((role) => {
+            const slotIndex = ROLE_TO_SLOT_INDEX[role]
+            const championId = picks[slotIndex]
+            return renderPickSlot(slotIndex, championId, role)
           })
         )}
       </div>
