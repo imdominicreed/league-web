@@ -9,8 +9,8 @@ import (
 // UserRoleProfile stores a user's rank and comfort rating for a specific role
 type UserRoleProfile struct {
 	ID            uuid.UUID  `json:"id" gorm:"type:uuid;primary_key;default:gen_random_uuid()"`
-	UserID        uuid.UUID  `json:"userId" gorm:"type:uuid;not null;index"`
-	Role          Role       `json:"role" gorm:"type:varchar(10);not null"`
+	UserID        uuid.UUID  `json:"userId" gorm:"type:uuid;not null;uniqueIndex:idx_user_role_profiles_user_role"`
+	Role          Role       `json:"role" gorm:"type:varchar(10);not null;uniqueIndex:idx_user_role_profiles_user_role"`
 	LeagueRank    LeagueRank `json:"leagueRank" gorm:"type:varchar(20);not null;default:'Unranked'"`
 	MMR           int        `json:"mmr" gorm:"not null;default:1200"`
 	ComfortRating int        `json:"comfortRating" gorm:"not null;default:3"`
