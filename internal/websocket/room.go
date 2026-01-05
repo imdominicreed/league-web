@@ -252,6 +252,7 @@ func (r *Room) handleJoin(client *Client) {
 		}
 	} else {
 		// Original 1v1 behavior
+		log.Printf("Room %s: Using 1v1 mode for user %s (side: %s)", r.id, client.userID, client.side)
 		switch client.side {
 		case "blue":
 			if r.blueClient != nil && r.blueClient != client {
@@ -779,9 +780,13 @@ func (r *Room) sendStateSyncLocked(client *Client) {
 		if r.redCaptainID != nil && client.userID == *r.redCaptainID {
 			isCaptain = true
 		}
+		log.Printf("STATE_SYNC: isTeamDraft=true, client=%s, side=%s, blueCaptainID=%v, redCaptainID=%v, isCaptain=%v",
+			client.userID, client.side, r.blueCaptainID, r.redCaptainID, isCaptain)
 	} else {
 		// In 1v1 mode, both players are effectively "captains"
 		isCaptain = client.side == "blue" || client.side == "red"
+		log.Printf("STATE_SYNC: isTeamDraft=false (1v1 mode), client=%s, side=%s, isCaptain=%v",
+			client.userID, client.side, isCaptain)
 	}
 
 	msg, _ := NewMessage(MessageTypeStateSync, StateSyncPayload{

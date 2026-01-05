@@ -350,13 +350,9 @@ func (h *LobbyHandler) GenerateTeams(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check all players are ready and convert to pointer slice
+	// Convert to pointer slice
 	players := make([]*domain.LobbyPlayer, len(lobby.Players))
 	for i := range lobby.Players {
-		if !lobby.Players[i].IsReady {
-			http.Error(w, "All players must be ready", http.StatusBadRequest)
-			return
-		}
 		players[i] = &lobby.Players[i]
 	}
 

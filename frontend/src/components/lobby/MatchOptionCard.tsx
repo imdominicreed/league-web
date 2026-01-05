@@ -32,59 +32,42 @@ export function MatchOptionCard({ option, isSelected, onSelect, disabled }: Matc
   blueTeam.sort(sortByRole)
   redTeam.sort(sortByRole)
 
-  // Algorithm-specific highlight
-  const getAlgorithmHighlight = () => {
-    if (!option.algorithmType) return null
-    switch (option.algorithmType) {
-      case 'mmr_balanced':
-        return `MMR Diff: ${option.mmrDifference}`
-      case 'role_comfort': {
-        const avgComfort = ((option.avgBlueComfort ?? 0) + (option.avgRedComfort ?? 0)) / 2
-        return `Avg Comfort: ${avgComfort.toFixed(1)}/5`
-      }
-      case 'lane_balanced':
-        return `Max Lane Gap: ${option.maxLaneDiff ?? 0} MMR`
-      default:
-        return null
-    }
-  }
-
   const renderTeam = (team: MatchAssignment[], side: 'blue' | 'red') => {
     const avgComfort = side === 'blue' ? (option.avgBlueComfort ?? 0) : (option.avgRedComfort ?? 0)
+    const avgMmr = side === 'blue' ? option.blueTeamAvgMmr : option.redTeamAvgMmr
     return (
-      <div className="space-y-2">
-        <h4
-          className={`font-semibold text-sm ${
-            side === 'blue' ? 'text-blue-400' : 'text-red-400'
-          }`}
-        >
-          {side === 'blue' ? 'Blue Team' : 'Red Team'}
-        </h4>
+      <div className="space-y-1">
+        <div className="flex items-center justify-between mb-2">
+          <h4
+            className={`font-semibold text-sm ${
+              side === 'blue' ? 'text-blue-400' : 'text-red-400'
+            }`}
+          >
+            {side === 'blue' ? 'Blue' : 'Red'}
+          </h4>
+          <span className="text-xs text-gray-500">{avgMmr} avg</span>
+        </div>
         {team.map(player => (
           <div
             key={player.userId}
-            className="flex items-center justify-between text-sm bg-gray-700/50 rounded px-2 py-1"
+            className="bg-gray-700/50 rounded px-2 py-1.5"
           >
-            <div className="flex items-center gap-2">
-              <span className="text-gray-400 w-16 text-xs">
-                {ROLE_DISPLAY_NAMES[player.assignedRole]}
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-gray-400 text-xs font-medium w-8 shrink-0">
+                {ROLE_DISPLAY_NAMES[player.assignedRole].slice(0, 3).toUpperCase()}
               </span>
-              <span className="text-white truncate max-w-[100px]">
+              <span className="text-white truncate flex-1 min-w-0">
                 {player.displayName || 'Unknown'}
               </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-gray-500 text-xs">{player.roleMmr}</span>
-              <span className="text-yellow-400 text-xs">
-                {'★'.repeat(player.comfortRating)}
-                {'☆'.repeat(5 - player.comfortRating)}
+              <span className="text-gray-500 text-xs shrink-0 tabular-nums">{player.roleMmr}</span>
+              <span className="text-yellow-400 text-xs shrink-0" title={`Comfort: ${player.comfortRating}/5`}>
+                {player.comfortRating}★
               </span>
             </div>
           </div>
         ))}
-        <div className="text-xs text-gray-400 mt-1 flex gap-3">
-          <span>Avg MMR: {side === 'blue' ? option.blueTeamAvgMmr : option.redTeamAvgMmr}</span>
-          <span>Comfort: {avgComfort.toFixed(1)}/5</span>
+        <div className="text-xs text-gray-500 pt-1">
+          Comfort: {avgComfort.toFixed(1)}/5
         </div>
       </div>
     )
@@ -100,38 +83,36 @@ export function MatchOptionCard({ option, isSelected, onSelect, disabled }: Matc
       } ${onSelect && !disabled ? 'cursor-pointer' : ''}`}
       onClick={() => onSelect && !disabled && onSelect()}
     >
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <span className="text-lg font-bold text-white">Option {option.optionNumber}</span>
-          {option.algorithmType && (
-            <span className={`px-2 py-0.5 rounded text-xs font-medium ${getAlgorithmBadgeColor(option.algorithmType)}`}>
-              {ALGORITHM_LABELS[option.algorithmType] || option.algorithmType}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <span
-            className={`px-2 py-1 rounded text-xs font-medium ${
-              option.balanceScore >= 80
-                ? 'bg-green-600/20 text-green-400'
-                : option.balanceScore >= 60
-                ? 'bg-yellow-600/20 text-yellow-400'
-                : 'bg-red-600/20 text-red-400'
-            }`}
-          >
-            Balance: {option.balanceScore.toFixed(1)}
-          </span>
-          <span className="text-xs text-gray-400">
-            Δ{option.mmrDifference} MMR
-          </span>
-        </div>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-lg font-bold text-white">Option {option.optionNumber}</span>
+        <span
+          className={`px-2 py-0.5 rounded text-xs font-medium ${
+            option.balanceScore >= 80
+              ? 'bg-green-600/20 text-green-400'
+              : option.balanceScore >= 60
+              ? 'bg-yellow-600/20 text-yellow-400'
+              : 'bg-red-600/20 text-red-400'
+          }`}
+        >
+          {option.balanceScore.toFixed(0)}%
+        </span>
       </div>
 
-      {getAlgorithmHighlight() && (
-        <div className="text-xs text-gray-400 mb-3">
-          {getAlgorithmHighlight()}
-        </div>
-      )}
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        {option.algorithmType && (
+          <span className={`px-2 py-0.5 rounded text-xs font-medium ${getAlgorithmBadgeColor(option.algorithmType)}`}>
+            {ALGORITHM_LABELS[option.algorithmType] || option.algorithmType}
+          </span>
+        )}
+        <span className="text-xs text-gray-400">
+          Δ{option.mmrDifference} MMR
+        </span>
+        {option.maxLaneDiff !== undefined && option.maxLaneDiff > 0 && (
+          <span className="text-xs text-gray-500">
+            Max lane gap: {option.maxLaneDiff}
+          </span>
+        )}
+      </div>
 
       <div className="grid grid-cols-2 gap-4">
         {renderTeam(blueTeam, 'blue')}

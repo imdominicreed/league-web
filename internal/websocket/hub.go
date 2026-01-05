@@ -97,6 +97,8 @@ func (h *Hub) handleJoinRoom(req *JoinRoomRequest) {
 		if err == nil && roomPlayer != nil {
 			// User is a room player - assign their side based on team
 			req.Client.side = string(roomPlayer.Team)
+			log.Printf("Hub: Found RoomPlayer for user %s in room %s: team=%s, isCaptain=%v",
+				req.Client.userID, roomUUID, roomPlayer.Team, roomPlayer.IsCaptain)
 
 			// Initialize team draft if not already done
 			if !room.IsTeamDraft() {
@@ -104,17 +106,24 @@ func (h *Hub) handleJoinRoom(req *JoinRoomRequest) {
 				if err == nil && len(players) > 0 {
 					room.InitializeTeamDraft(players)
 					log.Printf("Initialized team draft for room %s with %d players", roomUUID, len(players))
+				} else {
+					log.Printf("Hub: Failed to get room players for %s: err=%v, count=%d", roomUUID, err, len(players))
 				}
+			} else {
+				log.Printf("Hub: Room %s already initialized as team draft", roomUUID)
 			}
 		} else if req.Side == "" {
 			// User is not a room player and no side specified - they are a spectator
+			log.Printf("Hub: No RoomPlayer found for user %s in room %s (err=%v), using spectator", req.Client.userID, roomUUID, err)
 			req.Client.side = "spectator"
 		} else {
 			// Use the requested side (1v1 mode or explicit side selection)
+			log.Printf("Hub: No RoomPlayer for user %s, using requested side: %s", req.Client.userID, req.Side)
 			req.Client.side = req.Side
 		}
 	} else {
 		// No roomPlayerRepo available - use original behavior
+		log.Printf("Hub: No roomPlayerRepo available, using side: %s", req.Side)
 		req.Client.side = req.Side
 	}
 

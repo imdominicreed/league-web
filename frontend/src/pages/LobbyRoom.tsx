@@ -261,7 +261,7 @@ export default function LobbyRoom() {
                   ? 'Waiting for a captain to propose a team composition...'
                   : ''}
             </p>
-            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {matchOptions.map(opt => (
                 <MatchOptionCard
                   key={opt.optionNumber}

@@ -415,15 +415,29 @@ func (s *LobbyService) StartDraft(ctx context.Context, lobbyID uuid.UUID, userID
 	room.IsTeamDraft = true
 	room.LobbyID = &lobbyID
 
-	// Find captains (first player per team in role order)
-	blueCaptain := findCaptain(option.GetBlueTeam())
-	redCaptain := findCaptain(option.GetRedTeam())
-
-	if blueCaptain != nil {
-		room.BlueSideUserID = &blueCaptain.UserID
+	// Get lobby players to find the actual lobby captains (not by role order)
+	lobbyPlayers, err := s.lobbyPlayerRepo.GetByLobbyID(ctx, lobbyID)
+	if err != nil {
+		return nil, err
 	}
-	if redCaptain != nil {
-		room.RedSideUserID = &redCaptain.UserID
+
+	// Find lobby captains
+	var blueCaptainID, redCaptainID *uuid.UUID
+	for _, lp := range lobbyPlayers {
+		if lp.IsCaptain && lp.Team != nil {
+			if *lp.Team == domain.SideBlue {
+				blueCaptainID = &lp.UserID
+			} else if *lp.Team == domain.SideRed {
+				redCaptainID = &lp.UserID
+			}
+		}
+	}
+
+	if blueCaptainID != nil {
+		room.BlueSideUserID = blueCaptainID
+	}
+	if redCaptainID != nil {
+		room.RedSideUserID = redCaptainID
 	}
 
 	if err := s.roomService.roomRepo.Update(ctx, room); err != nil {
@@ -434,10 +448,10 @@ func (s *LobbyService) StartDraft(ctx context.Context, lobbyID uuid.UUID, userID
 	var roomPlayers []*domain.RoomPlayer
 	for _, assignment := range option.Assignments {
 		isCaptain := false
-		if blueCaptain != nil && assignment.UserID == blueCaptain.UserID {
+		if blueCaptainID != nil && assignment.UserID == *blueCaptainID {
 			isCaptain = true
 		}
-		if redCaptain != nil && assignment.UserID == redCaptain.UserID {
+		if redCaptainID != nil && assignment.UserID == *redCaptainID {
 			isCaptain = true
 		}
 
@@ -746,14 +760,9 @@ func (s *LobbyService) ProposeMatchmake(ctx context.Context, lobbyID, captainID 
 		return nil, ErrPendingActionExists
 	}
 
-	// Verify 10 players and all ready
+	// Verify 10 players
 	if !lobby.IsFull() {
 		return nil, ErrNotEnoughPlayers
-	}
-	for _, p := range lobby.Players {
-		if !p.IsReady {
-			return nil, ErrPlayersNotReady
-		}
 	}
 
 	// Verify the caller is a captain
@@ -985,8 +994,8 @@ func (s *LobbyService) executePendingAction(ctx context.Context, action *domain.
 		}
 		return s.applyMatchOption(ctx, action.LobbyID, *action.MatchOptionNum)
 	case domain.PendingActionStartDraft:
-		// StartDraft is now handled directly by any captain
-		return nil
+		_, err := s.executeStartDraft(ctx, action.LobbyID)
+		return err
 	default:
 		return ErrInvalidLobbyState
 	}
@@ -1011,12 +1020,6 @@ func (s *LobbyService) executeMatchmaking(ctx context.Context, lobbyID uuid.UUID
 
 	if len(players) != 10 {
 		return ErrNotEnoughPlayers
-	}
-
-	for _, p := range players {
-		if !p.IsReady {
-			return ErrPlayersNotReady
-		}
 	}
 
 	// Generate match options
@@ -1073,6 +1076,114 @@ func (s *LobbyService) applyMatchOption(ctx context.Context, lobbyID uuid.UUID, 
 	lobby.SelectedMatchOption = &optionNumber
 	lobby.Status = domain.LobbyStatusTeamSelected
 	return s.lobbyRepo.Update(ctx, lobby)
+}
+
+// executeStartDraft creates the draft room when start_draft pending action is approved
+func (s *LobbyService) executeStartDraft(ctx context.Context, lobbyID uuid.UUID) (*domain.Room, error) {
+	lobby, err := s.lobbyRepo.GetByID(ctx, lobbyID)
+	if err != nil {
+		return nil, err
+	}
+
+	if lobby.Status != domain.LobbyStatusTeamSelected {
+		return nil, ErrInvalidLobbyState
+	}
+
+	// Get the selected match option with assignments
+	if lobby.SelectedMatchOption == nil {
+		return nil, ErrNoMatchOptions
+	}
+	option, err := s.matchOptionRepo.GetByLobbyIDAndNumber(ctx, lobbyID, *lobby.SelectedMatchOption)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrInvalidMatchOption
+		}
+		return nil, err
+	}
+
+	// Get lobby players to find the actual lobby captains (not by role order)
+	lobbyPlayers, err := s.lobbyPlayerRepo.GetByLobbyID(ctx, lobbyID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Find lobby captains and use blue captain as creator
+	var blueCaptainID, redCaptainID *uuid.UUID
+	var creatorID uuid.UUID
+	for _, lp := range lobbyPlayers {
+		if lp.IsCaptain && lp.Team != nil {
+			if *lp.Team == domain.SideBlue {
+				blueCaptainID = &lp.UserID
+				creatorID = lp.UserID
+			} else if *lp.Team == domain.SideRed {
+				redCaptainID = &lp.UserID
+			}
+		}
+	}
+
+	// Create the room
+	room, err := s.roomService.CreateRoom(ctx, CreateRoomInput{
+		CreatedBy:     creatorID,
+		DraftMode:     lobby.DraftMode,
+		TimerDuration: lobby.TimerDurationSeconds,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Update the room with team draft fields
+	room.IsTeamDraft = true
+	room.LobbyID = &lobbyID
+
+	if blueCaptainID != nil {
+		room.BlueSideUserID = blueCaptainID
+	}
+	if redCaptainID != nil {
+		room.RedSideUserID = redCaptainID
+	}
+
+	if err := s.roomService.roomRepo.Update(ctx, room); err != nil {
+		return nil, err
+	}
+
+	// Create RoomPlayer entries for all 10 players
+	var roomPlayers []*domain.RoomPlayer
+	for _, assignment := range option.Assignments {
+		isCaptain := false
+		if blueCaptainID != nil && assignment.UserID == *blueCaptainID {
+			isCaptain = true
+		}
+		if redCaptainID != nil && assignment.UserID == *redCaptainID {
+			isCaptain = true
+		}
+
+		roomPlayer := &domain.RoomPlayer{
+			ID:           uuid.New(),
+			RoomID:       room.ID,
+			UserID:       assignment.UserID,
+			Team:         assignment.Team,
+			AssignedRole: assignment.AssignedRole,
+			IsCaptain:    isCaptain,
+			IsReady:      false,
+		}
+		roomPlayers = append(roomPlayers, roomPlayer)
+	}
+
+	if err := s.roomPlayerRepo.CreateMany(ctx, roomPlayers); err != nil {
+		return nil, err
+	}
+
+	// Update lobby status to drafting and set roomId
+	now := time.Now()
+	lobby.Status = domain.LobbyStatusDrafting
+	lobby.RoomID = &room.ID
+	lobby.StartedAt = &now
+
+	if err := s.lobbyRepo.Update(ctx, lobby); err != nil {
+		return nil, err
+	}
+
+	return room, nil
 }
 
 func (s *LobbyService) executeSwapPlayers(ctx context.Context, action *domain.PendingAction) error {
