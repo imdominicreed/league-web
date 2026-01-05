@@ -455,12 +455,19 @@ func (s *LobbyService) StartDraft(ctx context.Context, lobbyID uuid.UUID, userID
 			isCaptain = true
 		}
 
+		// Get display name from User relation
+		displayName := ""
+		if assignment.User != nil {
+			displayName = assignment.User.DisplayName
+		}
+
 		roomPlayer := &domain.RoomPlayer{
 			ID:           uuid.New(),
 			RoomID:       room.ID,
 			UserID:       assignment.UserID,
 			Team:         assignment.Team,
 			AssignedRole: assignment.AssignedRole,
+			DisplayName:  displayName,
 			IsCaptain:    isCaptain,
 			IsReady:      false,
 		}
@@ -1157,12 +1164,19 @@ func (s *LobbyService) executeStartDraft(ctx context.Context, lobbyID uuid.UUID)
 			isCaptain = true
 		}
 
+		// Get display name from User relation
+		displayName := ""
+		if assignment.User != nil {
+			displayName = assignment.User.DisplayName
+		}
+
 		roomPlayer := &domain.RoomPlayer{
 			ID:           uuid.New(),
 			RoomID:       room.ID,
 			UserID:       assignment.UserID,
 			Team:         assignment.Team,
 			AssignedRole: assignment.AssignedRole,
+			DisplayName:  displayName,
 			IsCaptain:    isCaptain,
 			IsReady:      false,
 		}
@@ -1200,11 +1214,10 @@ func (s *LobbyService) executeSwapPlayers(ctx context.Context, action *domain.Pe
 		return err
 	}
 
-	// Swap teams
+	// Swap teams and captain status together
+	// (captain status stays with the team position, not the person)
 	player1.Team, player2.Team = player2.Team, player1.Team
-
-	// If swapping captains, maintain captain status on new teams
-	// (captain stays with the person, not the team)
+	player1.IsCaptain, player2.IsCaptain = player2.IsCaptain, player1.IsCaptain
 
 	if err := s.lobbyPlayerRepo.Update(ctx, player1); err != nil {
 		return err

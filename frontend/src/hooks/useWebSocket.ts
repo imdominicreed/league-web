@@ -59,6 +59,12 @@ export function useWebSocket(roomId: string, side: string) {
     switch (message.type) {
       case 'STATE_SYNC': {
         const payload = message.payload as StateSyncPayload
+        console.log('STATE_SYNC received:', {
+          yourSide: payload.yourSide,
+          isCaptain: payload.isCaptain,
+          isTeamDraft: payload.isTeamDraft,
+          players: payload.players,
+        })
         dispatch(syncState({
           ...payload.draft,
           yourSide: payload.yourSide,

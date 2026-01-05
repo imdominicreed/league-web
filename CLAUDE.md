@@ -65,13 +65,13 @@ frontend/src/
 
 ## Draft Phase Sequence
 
-Pro play uses 20 phases: 6 bans → 4 picks → 4 bans → 6 picks
+Pro play uses 20 phases: 6 bans → 6 picks → 4 bans → 4 picks
 
 ```
 Phases 0-5:   Ban (B-R-B-R-B-R)
-Phases 6-9:   Pick (B-R-R-B)
-Phases 10-13: Ban (R-B-R-B)
-Phases 14-19: Pick (R-B-B-R-B-R)
+Phases 6-11:  Pick (B-R-R-B-B-R)
+Phases 12-15: Ban (R-B-R-B)
+Phases 16-19: Pick (R-B-B-R)
 ```
 
 ## WebSocket Protocol

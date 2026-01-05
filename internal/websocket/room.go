@@ -789,6 +789,21 @@ func (r *Room) sendStateSyncLocked(client *Client) {
 			client.userID, client.side, isCaptain)
 	}
 
+	// Build team players list for team draft mode
+	var teamPlayers []TeamPlayerInfo
+	if r.isTeamDraft && len(r.roomPlayers) > 0 {
+		teamPlayers = make([]TeamPlayerInfo, 0, len(r.roomPlayers))
+		for _, p := range r.roomPlayers {
+			teamPlayers = append(teamPlayers, TeamPlayerInfo{
+				ID:           p.UserID.String(),
+				DisplayName:  p.DisplayName,
+				Team:         string(p.Team),
+				AssignedRole: string(p.AssignedRole),
+				IsCaptain:    p.IsCaptain,
+			})
+		}
+	}
+
 	msg, _ := NewMessage(MessageTypeStateSync, StateSyncPayload{
 		Room: RoomInfo{
 			ID:            r.id.String(),
@@ -815,6 +830,7 @@ func (r *Room) sendStateSyncLocked(client *Client) {
 		YourSide:       client.side,
 		IsCaptain:      isCaptain,
 		IsTeamDraft:    r.isTeamDraft,
+		TeamPlayers:    teamPlayers,
 		SpectatorCount: len(r.spectators),
 	})
 

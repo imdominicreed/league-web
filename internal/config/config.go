@@ -30,7 +30,7 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		Port:                 getEnv("PORT", "8080"),
 		Environment:          getEnv("ENVIRONMENT", "development"),
-		DatabaseURL:          getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/league_draft?sslmode=disable"),
+		DatabaseURL:          getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5431/league_draft?sslmode=disable"),
 		JWTSecret:            getEnv("JWT_SECRET", ""),
 		JWTExpirationHours:   getEnvInt("JWT_EXPIRATION_HOURS", 24),
 		DefaultTimerDuration: time.Duration(getEnvInt("DEFAULT_TIMER_SECONDS", 30)) * time.Second,

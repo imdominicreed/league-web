@@ -61,28 +61,28 @@ type Phase struct {
 
 // ProPlayPhases defines the 20-phase pro play draft order
 var ProPlayPhases = []Phase{
-	// Ban Phase 1
+	// Ban Phase 1 (6 bans)
 	{0, SideBlue, ActionTypeBan},
 	{1, SideRed, ActionTypeBan},
 	{2, SideBlue, ActionTypeBan},
 	{3, SideRed, ActionTypeBan},
 	{4, SideBlue, ActionTypeBan},
 	{5, SideRed, ActionTypeBan},
-	// Pick Phase 1
+	// Pick Phase 1 (6 picks: B, RR, BB, R)
 	{6, SideBlue, ActionTypePick},
 	{7, SideRed, ActionTypePick},
 	{8, SideRed, ActionTypePick},
 	{9, SideBlue, ActionTypePick},
-	// Ban Phase 2
-	{10, SideRed, ActionTypeBan},
-	{11, SideBlue, ActionTypeBan},
+	{10, SideBlue, ActionTypePick},
+	{11, SideRed, ActionTypePick},
+	// Ban Phase 2 (4 bans: R, B, R, B)
 	{12, SideRed, ActionTypeBan},
 	{13, SideBlue, ActionTypeBan},
-	// Pick Phase 2
-	{14, SideRed, ActionTypePick},
-	{15, SideBlue, ActionTypePick},
-	{16, SideBlue, ActionTypePick},
-	{17, SideRed, ActionTypePick},
+	{14, SideRed, ActionTypeBan},
+	{15, SideBlue, ActionTypeBan},
+	// Pick Phase 2 (4 picks: R, BB, R)
+	{16, SideRed, ActionTypePick},
+	{17, SideBlue, ActionTypePick},
 	{18, SideBlue, ActionTypePick},
 	{19, SideRed, ActionTypePick},
 }

@@ -391,14 +391,14 @@ func TestDraftFlow_FullDraft(t *testing.T) {
 
 	// Pro play phases: 20 total
 	// Phases 0-5:   Ban (B-R-B-R-B-R)
-	// Phases 6-9:   Pick (B-R-R-B)
-	// Phases 10-13: Ban (R-B-R-B)
-	// Phases 14-19: Pick (R-B-B-R-B-R)
+	// Phases 6-11:  Pick (B-R-R-B-B-R)
+	// Phases 12-15: Ban (R-B-R-B)
+	// Phases 16-19: Pick (R-B-B-R)
 	phaseTeams := []string{
 		"blue", "red", "blue", "red", "blue", "red", // Bans 0-5
-		"blue", "red", "red", "blue", // Picks 6-9
-		"red", "blue", "red", "blue", // Bans 10-13
-		"red", "blue", "blue", "red", "blue", "red", // Picks 14-19
+		"blue", "red", "red", "blue", "blue", "red", // Picks 6-11
+		"red", "blue", "red", "blue", // Bans 12-15
+		"red", "blue", "blue", "red", // Picks 16-19
 	}
 
 	championIndex := 0
