@@ -35,7 +35,7 @@ function App() {
   }, [isAuthenticated, user, dispatch])
 
   return (
-    <div className="min-h-screen bg-lol-dark">
+    <div className="min-h-screen bg-lol-dark relative">
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/login" element={<Login />} />
@@ -113,8 +113,13 @@ function App() {
           }
         />
       </Routes>
+      <div className="fixed bottom-2 right-2 text-xs text-gray-600">
+        v{__APP_VERSION__}
+      </div>
     </div>
   )
 }
+
+declare const __APP_VERSION__: string
 
 export default App
