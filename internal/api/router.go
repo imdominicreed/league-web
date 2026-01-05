@@ -93,6 +93,22 @@ func NewRouter(services *service.Services, hub *websocket.Hub, repos *repository
 				r.Get("/{id}/match-options", lobbyHandler.GetMatchOptions)
 				r.Post("/{id}/select-option", lobbyHandler.SelectOption)
 				r.Post("/{id}/start-draft", lobbyHandler.StartDraft)
+
+				// Captain management
+				r.Post("/{id}/take-captain", lobbyHandler.TakeCaptain)
+				r.Post("/{id}/promote-captain", lobbyHandler.PromoteCaptain)
+				r.Post("/{id}/kick", lobbyHandler.KickPlayer)
+
+				// Pending actions
+				r.Post("/{id}/swap", lobbyHandler.ProposeSwap)
+				r.Post("/{id}/propose-matchmake", lobbyHandler.ProposeMatchmake)
+				r.Post("/{id}/propose-start-draft", lobbyHandler.ProposeStartDraft)
+				r.Get("/{id}/pending-action", lobbyHandler.GetPendingAction)
+				r.Post("/{id}/pending-action/{actionId}/approve", lobbyHandler.ApprovePendingAction)
+				r.Post("/{id}/pending-action/{actionId}/cancel", lobbyHandler.CancelPendingAction)
+
+				// Team stats
+				r.Get("/{id}/team-stats", lobbyHandler.GetTeamStats)
 			})
 		})
 

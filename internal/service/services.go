@@ -30,6 +30,7 @@ func NewServices(repos *repository.Repositories, cfg *config.Config) *Services {
 			repos.MatchOption,
 			repos.UserRoleProfile,
 			repos.RoomPlayer,
+			repos.PendingAction,
 			roomService,
 		),
 		Matchmaking: NewMatchmakingService(

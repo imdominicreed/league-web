@@ -31,6 +31,7 @@ func NewConnection(databaseURL string) (*gorm.DB, error) {
 		&domain.MatchOption{},
 		&domain.MatchOptionAssignment{},
 		&domain.RoomPlayer{},
+		&domain.PendingAction{},
 	)
 	if err != nil {
 		return nil, err
@@ -53,5 +54,6 @@ func NewRepositories(db *gorm.DB) *repository.Repositories {
 		LobbyPlayer:     NewLobbyPlayerRepository(db),
 		MatchOption:     NewMatchOptionRepository(db),
 		RoomPlayer:      NewRoomPlayerRepository(db),
+		PendingAction:   NewPendingActionRepository(db),
 	}
 }

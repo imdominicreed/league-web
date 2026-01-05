@@ -53,6 +53,44 @@ type LobbyPlayerResponse struct {
 	Team         *string `json:"team"`
 	AssignedRole *string `json:"assignedRole"`
 	IsReady      bool    `json:"isReady"`
+	IsCaptain    bool    `json:"isCaptain"`
+	JoinOrder    int     `json:"joinOrder"`
+}
+
+type PendingActionResponse struct {
+	ID             string  `json:"id"`
+	ActionType     string  `json:"actionType"`
+	Status         string  `json:"status"`
+	ProposedByUser string  `json:"proposedByUser"`
+	ProposedBySide string  `json:"proposedBySide"`
+	Player1ID      *string `json:"player1Id,omitempty"`
+	Player2ID      *string `json:"player2Id,omitempty"`
+	ApprovedByBlue bool    `json:"approvedByBlue"`
+	ApprovedByRed  bool    `json:"approvedByRed"`
+	ExpiresAt      string  `json:"expiresAt"`
+}
+
+type TeamStatsResponse struct {
+	BlueTeamAvgMMR int            `json:"blueTeamAvgMmr"`
+	RedTeamAvgMMR  int            `json:"redTeamAvgMmr"`
+	MMRDifference  int            `json:"mmrDifference"`
+	AvgBlueComfort float64        `json:"avgBlueComfort"`
+	AvgRedComfort  float64        `json:"avgRedComfort"`
+	LaneDiffs      map[string]int `json:"laneDiffs"`
+}
+
+type SwapRequest struct {
+	Player1ID string `json:"player1Id"`
+	Player2ID string `json:"player2Id"`
+	SwapType  string `json:"swapType"` // "players" or "roles"
+}
+
+type PromoteCaptainRequest struct {
+	UserID string `json:"userId"`
+}
+
+type KickPlayerRequest struct {
+	UserID string `json:"userId"`
 }
 
 type MatchOptionResponse struct {
@@ -463,6 +501,411 @@ func (h *LobbyHandler) StartDraft(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+// ==================== Captain Management ====================
+
+func (h *LobbyHandler) TakeCaptain(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	lobbyID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid lobby ID", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.lobbyService.TakeCaptain(r.Context(), lobbyID, userID); err != nil {
+		if errors.Is(err, service.ErrNotInLobby) {
+			http.Error(w, "Not in lobby", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, service.ErrNotOnTeam) {
+			http.Error(w, "Not on a team", http.StatusBadRequest)
+			return
+		}
+		log.Printf("ERROR [lobby.TakeCaptain] failed: %v", err)
+		http.Error(w, "Failed to take captain", http.StatusInternalServerError)
+		return
+	}
+
+	// Return updated lobby
+	lobby, _ := h.lobbyService.GetLobby(r.Context(), lobbyID.String())
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(toLobbyResponse(lobby))
+}
+
+func (h *LobbyHandler) PromoteCaptain(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	lobbyID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid lobby ID", http.StatusBadRequest)
+		return
+	}
+
+	var req PromoteCaptainRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	targetUserID, err := uuid.Parse(req.UserID)
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.lobbyService.PromoteCaptain(r.Context(), lobbyID, userID, targetUserID); err != nil {
+		if errors.Is(err, service.ErrNotCaptain) {
+			http.Error(w, "Only captain can promote", http.StatusForbidden)
+			return
+		}
+		if errors.Is(err, service.ErrNotOnTeam) {
+			http.Error(w, "Player not on your team", http.StatusBadRequest)
+			return
+		}
+		log.Printf("ERROR [lobby.PromoteCaptain] failed: %v", err)
+		http.Error(w, "Failed to promote captain", http.StatusInternalServerError)
+		return
+	}
+
+	lobby, _ := h.lobbyService.GetLobby(r.Context(), lobbyID.String())
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(toLobbyResponse(lobby))
+}
+
+func (h *LobbyHandler) KickPlayer(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	lobbyID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid lobby ID", http.StatusBadRequest)
+		return
+	}
+
+	var req KickPlayerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	targetUserID, err := uuid.Parse(req.UserID)
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.lobbyService.KickPlayer(r.Context(), lobbyID, userID, targetUserID); err != nil {
+		if errors.Is(err, service.ErrNotCaptain) {
+			http.Error(w, "Only captain can kick", http.StatusForbidden)
+			return
+		}
+		if errors.Is(err, service.ErrNotOnTeam) {
+			http.Error(w, "Player not on your team", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, service.ErrCannotKickSelf) {
+			http.Error(w, "Cannot kick yourself", http.StatusBadRequest)
+			return
+		}
+		log.Printf("ERROR [lobby.KickPlayer] failed: %v", err)
+		http.Error(w, "Failed to kick player", http.StatusInternalServerError)
+		return
+	}
+
+	lobby, _ := h.lobbyService.GetLobby(r.Context(), lobbyID.String())
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(toLobbyResponse(lobby))
+}
+
+// ==================== Pending Actions ====================
+
+func (h *LobbyHandler) ProposeSwap(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	lobbyID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid lobby ID", http.StatusBadRequest)
+		return
+	}
+
+	var req SwapRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	player1ID, err := uuid.Parse(req.Player1ID)
+	if err != nil {
+		http.Error(w, "Invalid player1 ID", http.StatusBadRequest)
+		return
+	}
+	player2ID, err := uuid.Parse(req.Player2ID)
+	if err != nil {
+		http.Error(w, "Invalid player2 ID", http.StatusBadRequest)
+		return
+	}
+
+	action, err := h.lobbyService.ProposeSwap(r.Context(), lobbyID, userID, service.SwapRequest{
+		Player1ID: player1ID,
+		Player2ID: player2ID,
+		SwapType:  req.SwapType,
+	})
+	if err != nil {
+		if errors.Is(err, service.ErrNotCaptain) {
+			http.Error(w, "Only captain can propose swap", http.StatusForbidden)
+			return
+		}
+		if errors.Is(err, service.ErrPendingActionExists) {
+			http.Error(w, "A pending action already exists", http.StatusConflict)
+			return
+		}
+		if errors.Is(err, service.ErrInvalidSwap) {
+			http.Error(w, "Invalid swap request", http.StatusBadRequest)
+			return
+		}
+		log.Printf("ERROR [lobby.ProposeSwap] failed: %v", err)
+		http.Error(w, "Failed to propose swap", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(toPendingActionResponse(action))
+}
+
+func (h *LobbyHandler) ProposeMatchmake(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	lobbyID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid lobby ID", http.StatusBadRequest)
+		return
+	}
+
+	action, err := h.lobbyService.ProposeMatchmake(r.Context(), lobbyID, userID)
+	if err != nil {
+		if errors.Is(err, service.ErrNotCaptain) {
+			http.Error(w, "Only captain can propose matchmake", http.StatusForbidden)
+			return
+		}
+		if errors.Is(err, service.ErrPendingActionExists) {
+			http.Error(w, "A pending action already exists", http.StatusConflict)
+			return
+		}
+		if errors.Is(err, service.ErrNotEnoughPlayers) {
+			http.Error(w, "Need 10 players", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, service.ErrPlayersNotReady) {
+			http.Error(w, "All players must be ready", http.StatusBadRequest)
+			return
+		}
+		log.Printf("ERROR [lobby.ProposeMatchmake] failed: %v", err)
+		http.Error(w, "Failed to propose matchmake", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(toPendingActionResponse(action))
+}
+
+func (h *LobbyHandler) ProposeStartDraft(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	lobbyID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid lobby ID", http.StatusBadRequest)
+		return
+	}
+
+	action, err := h.lobbyService.ProposeStartDraft(r.Context(), lobbyID, userID)
+	if err != nil {
+		if errors.Is(err, service.ErrNotCaptain) {
+			http.Error(w, "Only captain can propose start draft", http.StatusForbidden)
+			return
+		}
+		if errors.Is(err, service.ErrPendingActionExists) {
+			http.Error(w, "A pending action already exists", http.StatusConflict)
+			return
+		}
+		if errors.Is(err, service.ErrInvalidLobbyState) {
+			http.Error(w, "Teams must be selected first", http.StatusConflict)
+			return
+		}
+		log.Printf("ERROR [lobby.ProposeStartDraft] failed: %v", err)
+		http.Error(w, "Failed to propose start draft", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(toPendingActionResponse(action))
+}
+
+func (h *LobbyHandler) ApprovePendingAction(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	lobbyID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid lobby ID", http.StatusBadRequest)
+		return
+	}
+
+	actionID, err := uuid.Parse(chi.URLParam(r, "actionId"))
+	if err != nil {
+		http.Error(w, "Invalid action ID", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.lobbyService.ApprovePendingAction(r.Context(), lobbyID, userID, actionID); err != nil {
+		if errors.Is(err, service.ErrNotCaptain) {
+			http.Error(w, "Only captain can approve", http.StatusForbidden)
+			return
+		}
+		if errors.Is(err, service.ErrAlreadyApproved) {
+			http.Error(w, "Already approved", http.StatusConflict)
+			return
+		}
+		if errors.Is(err, service.ErrActionExpired) {
+			http.Error(w, "Action has expired", http.StatusGone)
+			return
+		}
+		if errors.Is(err, service.ErrPendingActionNotFound) {
+			http.Error(w, "Action not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("ERROR [lobby.ApprovePendingAction] failed: %v", err)
+		http.Error(w, "Failed to approve action", http.StatusInternalServerError)
+		return
+	}
+
+	lobby, _ := h.lobbyService.GetLobby(r.Context(), lobbyID.String())
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(toLobbyResponse(lobby))
+}
+
+func (h *LobbyHandler) CancelPendingAction(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	lobbyID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid lobby ID", http.StatusBadRequest)
+		return
+	}
+
+	actionID, err := uuid.Parse(chi.URLParam(r, "actionId"))
+	if err != nil {
+		http.Error(w, "Invalid action ID", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.lobbyService.CancelPendingAction(r.Context(), lobbyID, userID, actionID); err != nil {
+		if errors.Is(err, service.ErrNotCaptain) {
+			http.Error(w, "Only captain can cancel", http.StatusForbidden)
+			return
+		}
+		if errors.Is(err, service.ErrPendingActionNotFound) {
+			http.Error(w, "Action not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("ERROR [lobby.CancelPendingAction] failed: %v", err)
+		http.Error(w, "Failed to cancel action", http.StatusInternalServerError)
+		return
+	}
+
+	lobby, _ := h.lobbyService.GetLobby(r.Context(), lobbyID.String())
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(toLobbyResponse(lobby))
+}
+
+func (h *LobbyHandler) GetPendingAction(w http.ResponseWriter, r *http.Request) {
+	lobbyID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid lobby ID", http.StatusBadRequest)
+		return
+	}
+
+	action, err := h.lobbyService.GetPendingAction(r.Context(), lobbyID)
+	if err != nil {
+		log.Printf("ERROR [lobby.GetPendingAction] failed: %v", err)
+		http.Error(w, "Failed to get pending action", http.StatusInternalServerError)
+		return
+	}
+
+	if action == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(nil)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(toPendingActionResponse(action))
+}
+
+// ==================== Team Stats ====================
+
+func (h *LobbyHandler) GetTeamStats(w http.ResponseWriter, r *http.Request) {
+	lobbyID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid lobby ID", http.StatusBadRequest)
+		return
+	}
+
+	stats, err := h.lobbyService.GetTeamStats(r.Context(), lobbyID)
+	if err != nil {
+		log.Printf("ERROR [lobby.GetTeamStats] failed: %v", err)
+		http.Error(w, "Failed to get team stats", http.StatusInternalServerError)
+		return
+	}
+
+	// Convert Role keys to strings
+	laneDiffs := make(map[string]int)
+	for role, diff := range stats.LaneDiffs {
+		laneDiffs[string(role)] = diff
+	}
+
+	resp := TeamStatsResponse{
+		BlueTeamAvgMMR: stats.BlueTeamAvgMMR,
+		RedTeamAvgMMR:  stats.RedTeamAvgMMR,
+		MMRDifference:  stats.MMRDifference,
+		AvgBlueComfort: stats.AvgBlueComfort,
+		AvgRedComfort:  stats.AvgRedComfort,
+		LaneDiffs:      laneDiffs,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
 // Helper functions
 func toLobbyResponse(lobby *domain.Lobby) LobbyResponse {
 	var roomID *string
@@ -495,6 +938,8 @@ func toLobbyResponse(lobby *domain.Lobby) LobbyResponse {
 			Team:         team,
 			AssignedRole: role,
 			IsReady:      p.IsReady,
+			IsCaptain:    p.IsCaptain,
+			JoinOrder:    p.JoinOrder,
 		}
 	}
 
@@ -508,6 +953,31 @@ func toLobbyResponse(lobby *domain.Lobby) LobbyResponse {
 		TimerDurationSeconds: lobby.TimerDurationSeconds,
 		RoomID:               roomID,
 		Players:              players,
+	}
+}
+
+func toPendingActionResponse(action *domain.PendingAction) PendingActionResponse {
+	var player1ID, player2ID *string
+	if action.Player1ID != nil {
+		s := action.Player1ID.String()
+		player1ID = &s
+	}
+	if action.Player2ID != nil {
+		s := action.Player2ID.String()
+		player2ID = &s
+	}
+
+	return PendingActionResponse{
+		ID:             action.ID.String(),
+		ActionType:     string(action.ActionType),
+		Status:         string(action.Status),
+		ProposedByUser: action.ProposedByUser.String(),
+		ProposedBySide: string(action.ProposedBySide),
+		Player1ID:      player1ID,
+		Player2ID:      player2ID,
+		ApprovedByBlue: action.ApprovedByBlue,
+		ApprovedByRed:  action.ApprovedByRed,
+		ExpiresAt:      action.ExpiresAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 }
 

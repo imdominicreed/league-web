@@ -141,6 +141,33 @@ export interface LobbyPlayer {
   team: Side | null
   assignedRole: Role | null
   isReady: boolean
+  isCaptain: boolean
+  joinOrder: number
+}
+
+export type PendingActionType = 'swap_players' | 'swap_roles' | 'matchmake' | 'start_draft'
+export type PendingActionStatus = 'pending' | 'approved' | 'cancelled' | 'expired'
+
+export interface PendingAction {
+  id: string
+  actionType: PendingActionType
+  status: PendingActionStatus
+  proposedByUser: string
+  proposedBySide: Side
+  player1Id?: string
+  player2Id?: string
+  approvedByBlue: boolean
+  approvedByRed: boolean
+  expiresAt: string
+}
+
+export interface TeamStats {
+  blueTeamAvgMmr: number
+  redTeamAvgMmr: number
+  mmrDifference: number
+  avgBlueComfort: number
+  avgRedComfort: number
+  laneDiffs: Record<Role, number>
 }
 
 export type AlgorithmType = 'mmr_balanced' | 'role_comfort' | 'hybrid' | 'lane_balanced'

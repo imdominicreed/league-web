@@ -100,6 +100,14 @@ type RoomPlayerRepository interface {
 	GetCaptains(ctx context.Context, roomId uuid.UUID) (map[string]*domain.RoomPlayer, error)
 }
 
+type PendingActionRepository interface {
+	Create(ctx context.Context, action *domain.PendingAction) error
+	GetByID(ctx context.Context, id uuid.UUID) (*domain.PendingAction, error)
+	GetPendingByLobbyID(ctx context.Context, lobbyID uuid.UUID) (*domain.PendingAction, error)
+	Update(ctx context.Context, action *domain.PendingAction) error
+	CancelAllPending(ctx context.Context, lobbyID uuid.UUID) error
+}
+
 type Repositories struct {
 	User            UserRepository
 	Session         SessionRepository
@@ -113,4 +121,5 @@ type Repositories struct {
 	LobbyPlayer     LobbyPlayerRepository
 	MatchOption     MatchOptionRepository
 	RoomPlayer      RoomPlayerRepository
+	PendingAction   PendingActionRepository
 }

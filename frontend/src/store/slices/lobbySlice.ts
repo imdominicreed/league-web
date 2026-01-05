@@ -1,27 +1,47 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit'
 import { lobbyApi } from '@/api/lobby'
-import { Lobby, LobbyPlayer, MatchOption, Room } from '@/types'
+import { Lobby, LobbyPlayer, MatchOption, Room, PendingAction, TeamStats } from '@/types'
 
 interface LobbyState {
   lobby: Lobby | null
   matchOptions: MatchOption[] | null
+  pendingAction: PendingAction | null
+  teamStats: TeamStats | null
   loading: boolean
   error: string | null
   generatingTeams: boolean
   selectingOption: boolean
   startingDraft: boolean
   createdRoom: Room | null
+  // Captain action loading states
+  takingCaptain: boolean
+  promotingCaptain: boolean
+  kickingPlayer: boolean
+  // Pending action loading states
+  proposingAction: boolean
+  approvingAction: boolean
+  cancellingAction: boolean
+  fetchingTeamStats: boolean
 }
 
 const initialState: LobbyState = {
   lobby: null,
   matchOptions: null,
+  pendingAction: null,
+  teamStats: null,
   loading: false,
   error: null,
   generatingTeams: false,
   selectingOption: false,
   startingDraft: false,
   createdRoom: null,
+  takingCaptain: false,
+  promotingCaptain: false,
+  kickingPlayer: false,
+  proposingAction: false,
+  approvingAction: false,
+  cancellingAction: false,
+  fetchingTeamStats: false,
 }
 
 export const createLobby = createAsyncThunk(
@@ -94,6 +114,84 @@ export const startDraft = createAsyncThunk(
   }
 )
 
+// Captain management thunks
+export const takeCaptain = createAsyncThunk(
+  'lobby/takeCaptain',
+  async (lobbyId: string) => {
+    return await lobbyApi.takeCaptain(lobbyId)
+  }
+)
+
+export const promoteCaptain = createAsyncThunk(
+  'lobby/promoteCaptain',
+  async ({ lobbyId, userId }: { lobbyId: string; userId: string }) => {
+    return await lobbyApi.promoteCaptain(lobbyId, userId)
+  }
+)
+
+export const kickPlayer = createAsyncThunk(
+  'lobby/kickPlayer',
+  async ({ lobbyId, userId }: { lobbyId: string; userId: string }) => {
+    return await lobbyApi.kickPlayer(lobbyId, userId)
+  }
+)
+
+// Pending action thunks
+export const proposeSwap = createAsyncThunk(
+  'lobby/proposeSwap',
+  async ({ lobbyId, player1Id, player2Id, swapType }: {
+    lobbyId: string
+    player1Id: string
+    player2Id: string
+    swapType: 'players' | 'roles'
+  }) => {
+    return await lobbyApi.proposeSwap(lobbyId, { player1Id, player2Id, swapType })
+  }
+)
+
+export const proposeMatchmake = createAsyncThunk(
+  'lobby/proposeMatchmake',
+  async (lobbyId: string) => {
+    return await lobbyApi.proposeMatchmake(lobbyId)
+  }
+)
+
+export const proposeStartDraft = createAsyncThunk(
+  'lobby/proposeStartDraft',
+  async (lobbyId: string) => {
+    return await lobbyApi.proposeStartDraft(lobbyId)
+  }
+)
+
+export const fetchPendingAction = createAsyncThunk(
+  'lobby/fetchPendingAction',
+  async (lobbyId: string) => {
+    return await lobbyApi.getPendingAction(lobbyId)
+  }
+)
+
+export const approvePendingAction = createAsyncThunk(
+  'lobby/approvePendingAction',
+  async ({ lobbyId, actionId }: { lobbyId: string; actionId: string }) => {
+    return await lobbyApi.approvePendingAction(lobbyId, actionId)
+  }
+)
+
+export const cancelPendingAction = createAsyncThunk(
+  'lobby/cancelPendingAction',
+  async ({ lobbyId, actionId }: { lobbyId: string; actionId: string }) => {
+    return await lobbyApi.cancelPendingAction(lobbyId, actionId)
+  }
+)
+
+// Team stats thunk
+export const fetchTeamStats = createAsyncThunk(
+  'lobby/fetchTeamStats',
+  async (lobbyId: string) => {
+    return await lobbyApi.getTeamStats(lobbyId)
+  }
+)
+
 const lobbySlice = createSlice({
   name: 'lobby',
   initialState,
@@ -101,6 +199,8 @@ const lobbySlice = createSlice({
     clearLobby: (state) => {
       state.lobby = null
       state.matchOptions = null
+      state.pendingAction = null
+      state.teamStats = null
       state.error = null
     },
     clearLobbyError: (state) => {
@@ -126,6 +226,12 @@ const lobbySlice = createSlice({
     },
     setMatchOptions: (state, action: PayloadAction<MatchOption[]>) => {
       state.matchOptions = action.payload
+    },
+    setPendingAction: (state, action: PayloadAction<PendingAction | null>) => {
+      state.pendingAction = action.payload
+    },
+    setTeamStats: (state, action: PayloadAction<TeamStats | null>) => {
+      state.teamStats = action.payload
     },
   },
   extraReducers: (builder) => {
@@ -225,6 +331,127 @@ const lobbySlice = createSlice({
         state.startingDraft = false
         state.error = action.payload as string || 'Failed to start draft'
       })
+      // Take captain
+      .addCase(takeCaptain.pending, (state) => {
+        state.takingCaptain = true
+        state.error = null
+      })
+      .addCase(takeCaptain.fulfilled, (state, action) => {
+        state.takingCaptain = false
+        state.lobby = action.payload
+      })
+      .addCase(takeCaptain.rejected, (state, action) => {
+        state.takingCaptain = false
+        state.error = action.error.message || 'Failed to take captain'
+      })
+      // Promote captain
+      .addCase(promoteCaptain.pending, (state) => {
+        state.promotingCaptain = true
+        state.error = null
+      })
+      .addCase(promoteCaptain.fulfilled, (state, action) => {
+        state.promotingCaptain = false
+        state.lobby = action.payload
+      })
+      .addCase(promoteCaptain.rejected, (state, action) => {
+        state.promotingCaptain = false
+        state.error = action.error.message || 'Failed to promote captain'
+      })
+      // Kick player
+      .addCase(kickPlayer.pending, (state) => {
+        state.kickingPlayer = true
+        state.error = null
+      })
+      .addCase(kickPlayer.fulfilled, (state, action) => {
+        state.kickingPlayer = false
+        state.lobby = action.payload
+      })
+      .addCase(kickPlayer.rejected, (state, action) => {
+        state.kickingPlayer = false
+        state.error = action.error.message || 'Failed to kick player'
+      })
+      // Propose swap
+      .addCase(proposeSwap.pending, (state) => {
+        state.proposingAction = true
+        state.error = null
+      })
+      .addCase(proposeSwap.fulfilled, (state, action) => {
+        state.proposingAction = false
+        state.pendingAction = action.payload
+      })
+      .addCase(proposeSwap.rejected, (state, action) => {
+        state.proposingAction = false
+        state.error = action.error.message || 'Failed to propose swap'
+      })
+      // Propose matchmake
+      .addCase(proposeMatchmake.pending, (state) => {
+        state.proposingAction = true
+        state.error = null
+      })
+      .addCase(proposeMatchmake.fulfilled, (state, action) => {
+        state.proposingAction = false
+        state.pendingAction = action.payload
+      })
+      .addCase(proposeMatchmake.rejected, (state, action) => {
+        state.proposingAction = false
+        state.error = action.error.message || 'Failed to propose matchmake'
+      })
+      // Propose start draft
+      .addCase(proposeStartDraft.pending, (state) => {
+        state.proposingAction = true
+        state.error = null
+      })
+      .addCase(proposeStartDraft.fulfilled, (state, action) => {
+        state.proposingAction = false
+        state.pendingAction = action.payload
+      })
+      .addCase(proposeStartDraft.rejected, (state, action) => {
+        state.proposingAction = false
+        state.error = action.error.message || 'Failed to propose start draft'
+      })
+      // Fetch pending action
+      .addCase(fetchPendingAction.fulfilled, (state, action) => {
+        state.pendingAction = action.payload
+      })
+      // Approve pending action
+      .addCase(approvePendingAction.pending, (state) => {
+        state.approvingAction = true
+        state.error = null
+      })
+      .addCase(approvePendingAction.fulfilled, (state, action) => {
+        state.approvingAction = false
+        state.lobby = action.payload
+        state.pendingAction = null
+      })
+      .addCase(approvePendingAction.rejected, (state, action) => {
+        state.approvingAction = false
+        state.error = action.error.message || 'Failed to approve action'
+      })
+      // Cancel pending action
+      .addCase(cancelPendingAction.pending, (state) => {
+        state.cancellingAction = true
+        state.error = null
+      })
+      .addCase(cancelPendingAction.fulfilled, (state, action) => {
+        state.cancellingAction = false
+        state.lobby = action.payload
+        state.pendingAction = null
+      })
+      .addCase(cancelPendingAction.rejected, (state, action) => {
+        state.cancellingAction = false
+        state.error = action.error.message || 'Failed to cancel action'
+      })
+      // Fetch team stats
+      .addCase(fetchTeamStats.pending, (state) => {
+        state.fetchingTeamStats = true
+      })
+      .addCase(fetchTeamStats.fulfilled, (state, action) => {
+        state.fetchingTeamStats = false
+        state.teamStats = action.payload
+      })
+      .addCase(fetchTeamStats.rejected, (state) => {
+        state.fetchingTeamStats = false
+      })
   },
 })
 
@@ -235,5 +462,7 @@ export const {
   removePlayer,
   setLobby,
   setMatchOptions,
+  setPendingAction,
+  setTeamStats,
 } = lobbySlice.actions
 export default lobbySlice.reducer

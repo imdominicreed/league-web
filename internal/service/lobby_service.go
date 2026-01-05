@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	mathrand "math/rand"
 	"time"
 
 	"github.com/dom/league-draft-website/internal/domain"
@@ -14,25 +15,36 @@ import (
 )
 
 var (
-	ErrLobbyNotFound      = errors.New("lobby not found")
-	ErrLobbyFull          = errors.New("lobby is full")
-	ErrAlreadyInLobby     = errors.New("user is already in lobby")
-	ErrNotInLobby         = errors.New("user is not in lobby")
-	ErrNotLobbyCreator    = errors.New("only lobby creator can perform this action")
-	ErrNotEnoughPlayers   = errors.New("lobby needs 10 players")
-	ErrPlayersNotReady    = errors.New("not all players are ready")
-	ErrInvalidLobbyState  = errors.New("invalid lobby state for this action")
-	ErrNoMatchOptions     = errors.New("no match options available")
-	ErrInvalidMatchOption = errors.New("invalid match option")
+	ErrLobbyNotFound         = errors.New("lobby not found")
+	ErrLobbyFull             = errors.New("lobby is full")
+	ErrAlreadyInLobby        = errors.New("user is already in lobby")
+	ErrNotInLobby            = errors.New("user is not in lobby")
+	ErrNotLobbyCreator       = errors.New("only lobby creator can perform this action")
+	ErrNotEnoughPlayers      = errors.New("lobby needs 10 players")
+	ErrPlayersNotReady       = errors.New("not all players are ready")
+	ErrInvalidLobbyState     = errors.New("invalid lobby state for this action")
+	ErrNoMatchOptions        = errors.New("no match options available")
+	ErrInvalidMatchOption    = errors.New("invalid match option")
+	ErrNotCaptain            = errors.New("only captain can perform this action")
+	ErrNotOnTeam             = errors.New("player is not on your team")
+	ErrPendingActionExists   = errors.New("a pending action already exists")
+	ErrPendingActionNotFound = errors.New("pending action not found")
+	ErrAlreadyApproved       = errors.New("you have already approved this action")
+	ErrCannotApproveOwn      = errors.New("cannot approve your own proposal")
+	ErrActionExpired         = errors.New("pending action has expired")
+	ErrPlayerNotFound        = errors.New("player not found")
+	ErrCannotKickSelf        = errors.New("cannot kick yourself")
+	ErrInvalidSwap           = errors.New("invalid swap request")
 )
 
 type LobbyService struct {
-	lobbyRepo       repository.LobbyRepository
-	lobbyPlayerRepo repository.LobbyPlayerRepository
-	matchOptionRepo repository.MatchOptionRepository
-	profileRepo     repository.UserRoleProfileRepository
-	roomPlayerRepo  repository.RoomPlayerRepository
-	roomService     *RoomService
+	lobbyRepo         repository.LobbyRepository
+	lobbyPlayerRepo   repository.LobbyPlayerRepository
+	matchOptionRepo   repository.MatchOptionRepository
+	profileRepo       repository.UserRoleProfileRepository
+	roomPlayerRepo    repository.RoomPlayerRepository
+	pendingActionRepo repository.PendingActionRepository
+	roomService       *RoomService
 }
 
 func NewLobbyService(
@@ -41,15 +53,17 @@ func NewLobbyService(
 	matchOptionRepo repository.MatchOptionRepository,
 	profileRepo repository.UserRoleProfileRepository,
 	roomPlayerRepo repository.RoomPlayerRepository,
+	pendingActionRepo repository.PendingActionRepository,
 	roomService *RoomService,
 ) *LobbyService {
 	return &LobbyService{
-		lobbyRepo:       lobbyRepo,
-		lobbyPlayerRepo: lobbyPlayerRepo,
-		matchOptionRepo: matchOptionRepo,
-		profileRepo:     profileRepo,
-		roomPlayerRepo:  roomPlayerRepo,
-		roomService:     roomService,
+		lobbyRepo:         lobbyRepo,
+		lobbyPlayerRepo:   lobbyPlayerRepo,
+		matchOptionRepo:   matchOptionRepo,
+		profileRepo:       profileRepo,
+		roomPlayerRepo:    roomPlayerRepo,
+		pendingActionRepo: pendingActionRepo,
+		roomService:       roomService,
 	}
 }
 
@@ -80,13 +94,17 @@ func (s *LobbyService) CreateLobby(ctx context.Context, creatorID uuid.UUID, inp
 		return nil, err
 	}
 
-	// Creator automatically joins the lobby
+	// Creator automatically joins the lobby on blue side as captain
+	blueSide := domain.SideBlue
 	player := &domain.LobbyPlayer{
-		ID:       uuid.New(),
-		LobbyID:  lobby.ID,
-		UserID:   creatorID,
-		IsReady:  false,
-		JoinedAt: time.Now(),
+		ID:        uuid.New(),
+		LobbyID:   lobby.ID,
+		UserID:    creatorID,
+		Team:      &blueSide,
+		IsReady:   false,
+		IsCaptain: true,
+		JoinOrder: 0,
+		JoinedAt:  time.Now(),
 	}
 
 	if err := s.lobbyPlayerRepo.Create(ctx, player); err != nil {
@@ -127,21 +145,62 @@ func (s *LobbyService) JoinLobby(ctx context.Context, lobbyID, userID uuid.UUID)
 		return nil, err
 	}
 
-	// Check if lobby is full
-	count, err := s.lobbyPlayerRepo.CountByLobbyID(ctx, lobbyID)
+	// Get all current players to determine side assignment
+	players, err := s.lobbyPlayerRepo.GetByLobbyID(ctx, lobbyID)
 	if err != nil {
 		return nil, err
 	}
-	if count >= domain.MaxLobbyPlayers {
+
+	if len(players) >= domain.MaxLobbyPlayers {
 		return nil, ErrLobbyFull
 	}
 
+	// Count players on each side
+	blueCount, redCount := 0, 0
+	hasBlueCaptain, hasRedCaptain := false, false
+	for _, p := range players {
+		if p.Team != nil {
+			if *p.Team == domain.SideBlue {
+				blueCount++
+				if p.IsCaptain {
+					hasBlueCaptain = true
+				}
+			} else if *p.Team == domain.SideRed {
+				redCount++
+				if p.IsCaptain {
+					hasRedCaptain = true
+				}
+			}
+		}
+	}
+
+	// Assign to side with fewer players, random if equal
+	var side domain.Side
+	if blueCount < redCount {
+		side = domain.SideBlue
+	} else if redCount < blueCount {
+		side = domain.SideRed
+	} else {
+		// Random when equal
+		if mathrand.Intn(2) == 0 {
+			side = domain.SideBlue
+		} else {
+			side = domain.SideRed
+		}
+	}
+
+	// First player on a side becomes captain
+	isCaptain := (side == domain.SideBlue && !hasBlueCaptain) || (side == domain.SideRed && !hasRedCaptain)
+
 	player := &domain.LobbyPlayer{
-		ID:       uuid.New(),
-		LobbyID:  lobbyID,
-		UserID:   userID,
-		IsReady:  false,
-		JoinedAt: time.Now(),
+		ID:        uuid.New(),
+		LobbyID:   lobbyID,
+		UserID:    userID,
+		Team:      &side,
+		IsReady:   false,
+		IsCaptain: isCaptain,
+		JoinOrder: len(players),
+		JoinedAt:  time.Now(),
 	}
 
 	if err := s.lobbyPlayerRepo.Create(ctx, player); err != nil {
@@ -164,13 +223,42 @@ func (s *LobbyService) LeaveLobby(ctx context.Context, lobbyID, userID uuid.UUID
 		return ErrInvalidLobbyState
 	}
 
-	// Check if user is in lobby
-	_, err = s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, lobbyID, userID)
+	// Get the leaving player
+	leavingPlayer, err := s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, lobbyID, userID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrNotInLobby
 		}
 		return err
+	}
+
+	// If this player is captain, we need to promote a successor
+	if leavingPlayer.IsCaptain && leavingPlayer.Team != nil {
+		players, err := s.lobbyPlayerRepo.GetByLobbyID(ctx, lobbyID)
+		if err != nil {
+			return err
+		}
+
+		// Find the next player on the same team by join order
+		var successor *domain.LobbyPlayer
+		for _, p := range players {
+			if p.UserID == userID {
+				continue // Skip the leaving player
+			}
+			if p.Team != nil && *p.Team == *leavingPlayer.Team {
+				if successor == nil || p.JoinOrder < successor.JoinOrder {
+					successor = p
+				}
+			}
+		}
+
+		// Promote successor if found
+		if successor != nil {
+			successor.IsCaptain = true
+			if err := s.lobbyPlayerRepo.Update(ctx, successor); err != nil {
+				return err
+			}
+		}
 	}
 
 	return s.lobbyPlayerRepo.Delete(ctx, lobbyID, userID)
@@ -389,4 +477,607 @@ func generateLobbyShortCode() string {
 	bytes := make([]byte, 4)
 	rand.Read(bytes)
 	return hex.EncodeToString(bytes)[:8]
+}
+
+// ==================== Captain Management ====================
+
+// TakeCaptain allows any player to take captain status from current captain
+func (s *LobbyService) TakeCaptain(ctx context.Context, lobbyID, userID uuid.UUID) error {
+	lobby, err := s.lobbyRepo.GetByID(ctx, lobbyID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrLobbyNotFound
+		}
+		return err
+	}
+
+	if lobby.Status != domain.LobbyStatusWaitingForPlayers {
+		return ErrInvalidLobbyState
+	}
+
+	// Get the player who wants to take captain
+	player, err := s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, lobbyID, userID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrNotInLobby
+		}
+		return err
+	}
+
+	if player.Team == nil {
+		return ErrNotOnTeam
+	}
+
+	if player.IsCaptain {
+		return nil // Already captain
+	}
+
+	// Find current captain of the same team and remove their status
+	players, err := s.lobbyPlayerRepo.GetByLobbyID(ctx, lobbyID)
+	if err != nil {
+		return err
+	}
+
+	for _, p := range players {
+		if p.Team != nil && *p.Team == *player.Team && p.IsCaptain {
+			p.IsCaptain = false
+			if err := s.lobbyPlayerRepo.Update(ctx, p); err != nil {
+				return err
+			}
+			break
+		}
+	}
+
+	// Make the requesting player captain
+	player.IsCaptain = true
+	return s.lobbyPlayerRepo.Update(ctx, player)
+}
+
+// PromoteCaptain allows captain to promote a teammate to captain
+func (s *LobbyService) PromoteCaptain(ctx context.Context, lobbyID, captainID, targetUserID uuid.UUID) error {
+	lobby, err := s.lobbyRepo.GetByID(ctx, lobbyID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrLobbyNotFound
+		}
+		return err
+	}
+
+	if lobby.Status != domain.LobbyStatusWaitingForPlayers {
+		return ErrInvalidLobbyState
+	}
+
+	// Verify the caller is captain
+	captain, err := s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, lobbyID, captainID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrNotInLobby
+		}
+		return err
+	}
+
+	if !captain.IsCaptain {
+		return ErrNotCaptain
+	}
+
+	// Get the target player
+	target, err := s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, lobbyID, targetUserID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrPlayerNotFound
+		}
+		return err
+	}
+
+	// Verify target is on same team
+	if target.Team == nil || captain.Team == nil || *target.Team != *captain.Team {
+		return ErrNotOnTeam
+	}
+
+	// Swap captain status
+	captain.IsCaptain = false
+	target.IsCaptain = true
+
+	if err := s.lobbyPlayerRepo.Update(ctx, captain); err != nil {
+		return err
+	}
+	return s.lobbyPlayerRepo.Update(ctx, target)
+}
+
+// KickPlayer allows captain to remove a player from their team
+func (s *LobbyService) KickPlayer(ctx context.Context, lobbyID, captainID, targetUserID uuid.UUID) error {
+	lobby, err := s.lobbyRepo.GetByID(ctx, lobbyID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrLobbyNotFound
+		}
+		return err
+	}
+
+	if lobby.Status != domain.LobbyStatusWaitingForPlayers {
+		return ErrInvalidLobbyState
+	}
+
+	// Verify the caller is captain
+	captain, err := s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, lobbyID, captainID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrNotInLobby
+		}
+		return err
+	}
+
+	if !captain.IsCaptain {
+		return ErrNotCaptain
+	}
+
+	if captainID == targetUserID {
+		return ErrCannotKickSelf
+	}
+
+	// Get the target player
+	target, err := s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, lobbyID, targetUserID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrPlayerNotFound
+		}
+		return err
+	}
+
+	// Verify target is on same team
+	if target.Team == nil || captain.Team == nil || *target.Team != *captain.Team {
+		return ErrNotOnTeam
+	}
+
+	return s.lobbyPlayerRepo.Delete(ctx, lobbyID, targetUserID)
+}
+
+// ==================== Pending Actions ====================
+
+// SwapRequest represents a request to swap players or roles
+type SwapRequest struct {
+	Player1ID uuid.UUID
+	Player2ID uuid.UUID
+	SwapType  string // "players" or "roles"
+}
+
+// ProposeSwap creates a pending action to swap players between teams or roles within a team
+func (s *LobbyService) ProposeSwap(ctx context.Context, lobbyID, captainID uuid.UUID, req SwapRequest) (*domain.PendingAction, error) {
+	lobby, err := s.lobbyRepo.GetByID(ctx, lobbyID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrLobbyNotFound
+		}
+		return nil, err
+	}
+
+	if lobby.Status != domain.LobbyStatusWaitingForPlayers {
+		return nil, ErrInvalidLobbyState
+	}
+
+	// Check for existing pending action
+	existing, _ := s.pendingActionRepo.GetPendingByLobbyID(ctx, lobbyID)
+	if existing != nil && !existing.IsExpired() {
+		return nil, ErrPendingActionExists
+	}
+
+	// Verify the caller is a captain
+	captain, err := s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, lobbyID, captainID)
+	if err != nil {
+		return nil, err
+	}
+	if !captain.IsCaptain || captain.Team == nil {
+		return nil, ErrNotCaptain
+	}
+
+	// Verify both players exist
+	player1, err := s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, lobbyID, req.Player1ID)
+	if err != nil {
+		return nil, ErrPlayerNotFound
+	}
+	player2, err := s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, lobbyID, req.Player2ID)
+	if err != nil {
+		return nil, ErrPlayerNotFound
+	}
+
+	// Determine action type
+	var actionType domain.PendingActionType
+	if req.SwapType == "roles" {
+		// Role swap: both players must be on same team
+		if player1.Team == nil || player2.Team == nil || *player1.Team != *player2.Team {
+			return nil, ErrInvalidSwap
+		}
+		actionType = domain.PendingActionSwapRoles
+	} else {
+		// Player swap: players must be on different teams
+		if player1.Team == nil || player2.Team == nil || *player1.Team == *player2.Team {
+			return nil, ErrInvalidSwap
+		}
+		actionType = domain.PendingActionSwapPlayers
+	}
+
+	action := domain.NewPendingAction(lobbyID, captainID, *captain.Team, actionType)
+	action.Player1ID = &req.Player1ID
+	action.Player2ID = &req.Player2ID
+
+	if err := s.pendingActionRepo.Create(ctx, action); err != nil {
+		return nil, err
+	}
+
+	return action, nil
+}
+
+// ProposeMatchmake creates a pending action to run matchmaking
+func (s *LobbyService) ProposeMatchmake(ctx context.Context, lobbyID, captainID uuid.UUID) (*domain.PendingAction, error) {
+	lobby, err := s.lobbyRepo.GetByID(ctx, lobbyID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrLobbyNotFound
+		}
+		return nil, err
+	}
+
+	if lobby.Status != domain.LobbyStatusWaitingForPlayers {
+		return nil, ErrInvalidLobbyState
+	}
+
+	// Check for existing pending action
+	existing, _ := s.pendingActionRepo.GetPendingByLobbyID(ctx, lobbyID)
+	if existing != nil && !existing.IsExpired() {
+		return nil, ErrPendingActionExists
+	}
+
+	// Verify 10 players and all ready
+	if !lobby.IsFull() {
+		return nil, ErrNotEnoughPlayers
+	}
+	for _, p := range lobby.Players {
+		if !p.IsReady {
+			return nil, ErrPlayersNotReady
+		}
+	}
+
+	// Verify the caller is a captain
+	captain, err := s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, lobbyID, captainID)
+	if err != nil {
+		return nil, err
+	}
+	if !captain.IsCaptain || captain.Team == nil {
+		return nil, ErrNotCaptain
+	}
+
+	action := domain.NewPendingAction(lobbyID, captainID, *captain.Team, domain.PendingActionMatchmake)
+
+	if err := s.pendingActionRepo.Create(ctx, action); err != nil {
+		return nil, err
+	}
+
+	return action, nil
+}
+
+// ProposeStartDraft creates a pending action to start the draft
+func (s *LobbyService) ProposeStartDraft(ctx context.Context, lobbyID, captainID uuid.UUID) (*domain.PendingAction, error) {
+	lobby, err := s.lobbyRepo.GetByID(ctx, lobbyID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrLobbyNotFound
+		}
+		return nil, err
+	}
+
+	if lobby.Status != domain.LobbyStatusTeamSelected {
+		return nil, ErrInvalidLobbyState
+	}
+
+	// Check for existing pending action
+	existing, _ := s.pendingActionRepo.GetPendingByLobbyID(ctx, lobbyID)
+	if existing != nil && !existing.IsExpired() {
+		return nil, ErrPendingActionExists
+	}
+
+	// Verify the caller is a captain
+	captain, err := s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, lobbyID, captainID)
+	if err != nil {
+		return nil, err
+	}
+	if !captain.IsCaptain || captain.Team == nil {
+		return nil, ErrNotCaptain
+	}
+
+	action := domain.NewPendingAction(lobbyID, captainID, *captain.Team, domain.PendingActionStartDraft)
+
+	if err := s.pendingActionRepo.Create(ctx, action); err != nil {
+		return nil, err
+	}
+
+	return action, nil
+}
+
+// ApprovePendingAction approves a pending action by the other captain
+func (s *LobbyService) ApprovePendingAction(ctx context.Context, lobbyID, captainID, actionID uuid.UUID) error {
+	action, err := s.pendingActionRepo.GetByID(ctx, actionID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrPendingActionNotFound
+		}
+		return err
+	}
+
+	if action.LobbyID != lobbyID {
+		return ErrPendingActionNotFound
+	}
+
+	if action.Status != domain.PendingStatusPending {
+		return ErrInvalidLobbyState
+	}
+
+	if action.IsExpired() {
+		action.Status = domain.PendingStatusExpired
+		s.pendingActionRepo.Update(ctx, action)
+		return ErrActionExpired
+	}
+
+	// Verify the caller is a captain
+	captain, err := s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, lobbyID, captainID)
+	if err != nil {
+		return err
+	}
+	if !captain.IsCaptain || captain.Team == nil {
+		return ErrNotCaptain
+	}
+
+	// Check if already approved by this side
+	if *captain.Team == domain.SideBlue && action.ApprovedByBlue {
+		return ErrAlreadyApproved
+	}
+	if *captain.Team == domain.SideRed && action.ApprovedByRed {
+		return ErrAlreadyApproved
+	}
+
+	// Mark approval
+	if *captain.Team == domain.SideBlue {
+		action.ApprovedByBlue = true
+	} else {
+		action.ApprovedByRed = true
+	}
+
+	// If fully approved, execute the action
+	if action.IsFullyApproved() {
+		if err := s.executePendingAction(ctx, action); err != nil {
+			return err
+		}
+		action.Status = domain.PendingStatusApproved
+	}
+
+	return s.pendingActionRepo.Update(ctx, action)
+}
+
+// CancelPendingAction cancels a pending action
+func (s *LobbyService) CancelPendingAction(ctx context.Context, lobbyID, captainID, actionID uuid.UUID) error {
+	action, err := s.pendingActionRepo.GetByID(ctx, actionID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrPendingActionNotFound
+		}
+		return err
+	}
+
+	if action.LobbyID != lobbyID {
+		return ErrPendingActionNotFound
+	}
+
+	if action.Status != domain.PendingStatusPending {
+		return ErrInvalidLobbyState
+	}
+
+	// Verify the caller is a captain
+	captain, err := s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, lobbyID, captainID)
+	if err != nil {
+		return err
+	}
+	if !captain.IsCaptain {
+		return ErrNotCaptain
+	}
+
+	action.Status = domain.PendingStatusCancelled
+	return s.pendingActionRepo.Update(ctx, action)
+}
+
+// GetPendingAction returns the current pending action for a lobby
+func (s *LobbyService) GetPendingAction(ctx context.Context, lobbyID uuid.UUID) (*domain.PendingAction, error) {
+	action, err := s.pendingActionRepo.GetPendingByLobbyID(ctx, lobbyID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	// Check if expired
+	if action.IsExpired() {
+		action.Status = domain.PendingStatusExpired
+		s.pendingActionRepo.Update(ctx, action)
+		return nil, nil
+	}
+
+	return action, nil
+}
+
+// executePendingAction performs the action after both captains approve
+func (s *LobbyService) executePendingAction(ctx context.Context, action *domain.PendingAction) error {
+	switch action.ActionType {
+	case domain.PendingActionSwapPlayers:
+		return s.executeSwapPlayers(ctx, action)
+	case domain.PendingActionSwapRoles:
+		return s.executeSwapRoles(ctx, action)
+	case domain.PendingActionMatchmake:
+		// Matchmake is handled separately - this just marks it as approved
+		// The actual matchmaking happens when approved
+		return nil
+	case domain.PendingActionStartDraft:
+		// StartDraft is handled separately after approval
+		return nil
+	default:
+		return ErrInvalidLobbyState
+	}
+}
+
+func (s *LobbyService) executeSwapPlayers(ctx context.Context, action *domain.PendingAction) error {
+	if action.Player1ID == nil || action.Player2ID == nil {
+		return ErrInvalidSwap
+	}
+
+	player1, err := s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, action.LobbyID, *action.Player1ID)
+	if err != nil {
+		return err
+	}
+	player2, err := s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, action.LobbyID, *action.Player2ID)
+	if err != nil {
+		return err
+	}
+
+	// Swap teams
+	player1.Team, player2.Team = player2.Team, player1.Team
+
+	// If swapping captains, maintain captain status on new teams
+	// (captain stays with the person, not the team)
+
+	if err := s.lobbyPlayerRepo.Update(ctx, player1); err != nil {
+		return err
+	}
+	return s.lobbyPlayerRepo.Update(ctx, player2)
+}
+
+func (s *LobbyService) executeSwapRoles(ctx context.Context, action *domain.PendingAction) error {
+	if action.Player1ID == nil || action.Player2ID == nil {
+		return ErrInvalidSwap
+	}
+
+	player1, err := s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, action.LobbyID, *action.Player1ID)
+	if err != nil {
+		return err
+	}
+	player2, err := s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, action.LobbyID, *action.Player2ID)
+	if err != nil {
+		return err
+	}
+
+	// Swap roles
+	player1.AssignedRole, player2.AssignedRole = player2.AssignedRole, player1.AssignedRole
+
+	if err := s.lobbyPlayerRepo.Update(ctx, player1); err != nil {
+		return err
+	}
+	return s.lobbyPlayerRepo.Update(ctx, player2)
+}
+
+// ==================== Team Stats ====================
+
+// TeamStats represents the current team balance stats
+type TeamStats struct {
+	BlueTeamAvgMMR int                `json:"blueTeamAvgMmr"`
+	RedTeamAvgMMR  int                `json:"redTeamAvgMmr"`
+	MMRDifference  int                `json:"mmrDifference"`
+	AvgBlueComfort float64            `json:"avgBlueComfort"`
+	AvgRedComfort  float64            `json:"avgRedComfort"`
+	LaneDiffs      map[domain.Role]int `json:"laneDiffs"`
+}
+
+// GetTeamStats calculates current team balance stats
+func (s *LobbyService) GetTeamStats(ctx context.Context, lobbyID uuid.UUID) (*TeamStats, error) {
+	players, err := s.lobbyPlayerRepo.GetByLobbyID(ctx, lobbyID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get user IDs for profile lookup
+	userIDs := make([]uuid.UUID, 0, len(players))
+	for _, p := range players {
+		userIDs = append(userIDs, p.UserID)
+	}
+
+	profiles, err := s.profileRepo.GetByUserIDs(ctx, userIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	stats := &TeamStats{
+		LaneDiffs: make(map[domain.Role]int),
+	}
+
+	var blueTotalMMR, redTotalMMR int
+	var blueTotalComfort, redTotalComfort float64
+	blueCount, redCount := 0, 0
+	blueRoleMMR := make(map[domain.Role]int)
+	redRoleMMR := make(map[domain.Role]int)
+
+	for _, p := range players {
+		if p.Team == nil {
+			continue
+		}
+
+		// Get player's best MMR and comfort for their assigned role (or average if no role)
+		userProfiles := profiles[p.UserID]
+		var mmr int
+		var comfort int
+
+		if p.AssignedRole != nil {
+			// Find profile for assigned role
+			for _, prof := range userProfiles {
+				if prof.Role == *p.AssignedRole {
+					mmr = prof.MMR
+					comfort = prof.ComfortRating
+					break
+				}
+			}
+		}
+
+		// If no assigned role or no profile found, use average
+		if mmr == 0 && len(userProfiles) > 0 {
+			totalMMR := 0
+			totalComfort := 0
+			for _, prof := range userProfiles {
+				totalMMR += prof.MMR
+				totalComfort += prof.ComfortRating
+			}
+			mmr = totalMMR / len(userProfiles)
+			comfort = totalComfort / len(userProfiles)
+		}
+
+		if *p.Team == domain.SideBlue {
+			blueTotalMMR += mmr
+			blueTotalComfort += float64(comfort)
+			blueCount++
+			if p.AssignedRole != nil {
+				blueRoleMMR[*p.AssignedRole] = mmr
+			}
+		} else if *p.Team == domain.SideRed {
+			redTotalMMR += mmr
+			redTotalComfort += float64(comfort)
+			redCount++
+			if p.AssignedRole != nil {
+				redRoleMMR[*p.AssignedRole] = mmr
+			}
+		}
+	}
+
+	if blueCount > 0 {
+		stats.BlueTeamAvgMMR = blueTotalMMR / blueCount
+		stats.AvgBlueComfort = blueTotalComfort / float64(blueCount)
+	}
+	if redCount > 0 {
+		stats.RedTeamAvgMMR = redTotalMMR / redCount
+		stats.AvgRedComfort = redTotalComfort / float64(redCount)
+	}
+
+	stats.MMRDifference = abs(stats.BlueTeamAvgMMR - stats.RedTeamAvgMMR)
+
+	// Calculate lane diffs
+	for _, role := range domain.AllRoles {
+		blueMMR := blueRoleMMR[role]
+		redMMR := redRoleMMR[role]
+		stats.LaneDiffs[role] = blueMMR - redMMR
+	}
+
+	return stats, nil
 }

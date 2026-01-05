@@ -75,6 +75,8 @@ type LobbyPlayer struct {
 	Team         *Side      `json:"team" gorm:"type:varchar(10)"`
 	AssignedRole *Role      `json:"assignedRole" gorm:"type:varchar(10)"`
 	IsReady      bool       `json:"isReady" gorm:"not null;default:false"`
+	IsCaptain    bool       `json:"isCaptain" gorm:"not null;default:false"`
+	JoinOrder    int        `json:"joinOrder" gorm:"not null;default:0"`
 	JoinedAt     time.Time  `json:"joinedAt"`
 
 	// Relations
