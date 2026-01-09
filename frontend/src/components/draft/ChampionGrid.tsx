@@ -50,7 +50,7 @@ export default function ChampionGrid({ onSelect, onLockIn, onHover, isYourTurn, 
   }
 
   const handleMouseEnter = (championId: string) => {
-    if (isYourTurn && !usedChampions.has(championId)) {
+    if (isYourTurn && !usedChampions.has(championId) && !selectedChampion) {
       onHover(championId)
     }
   }
