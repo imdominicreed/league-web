@@ -1,7 +1,33 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit'
-import { DraftState, TeamPlayer } from '@/types'
+import { TeamPlayer } from '@/types'
 
-interface DraftSliceState extends DraftState {
+interface EditingSlot {
+  slotType: 'ban' | 'pick'
+  team: 'blue' | 'red'
+  slotIndex: number
+}
+
+interface PendingEdit {
+  proposedBy: string
+  proposedSide: 'blue' | 'red'
+  slotType: 'ban' | 'pick'
+  team: 'blue' | 'red'
+  slotIndex: number
+  oldChampionId: string
+  newChampionId: string
+  expiresAt: number
+}
+
+interface DraftSliceState {
+  currentPhase: number
+  currentTeam: 'blue' | 'red' | null
+  actionType: 'ban' | 'pick' | null
+  timerRemainingMs: number
+  blueBans: string[]
+  redBans: string[]
+  bluePicks: string[]
+  redPicks: string[]
+  isComplete: boolean
   hoveredChampion: {
     blue: string | null
     red: string | null
@@ -11,6 +37,13 @@ interface DraftSliceState extends DraftState {
   teamPlayers: TeamPlayer[]
   isTeamDraft: boolean
   isBufferPeriod: boolean
+  // Pause state
+  isPaused: boolean
+  pausedBy: string | null
+  pausedBySide: 'blue' | 'red' | null
+  // Edit state
+  editingSlot: EditingSlot | null
+  pendingEdit: PendingEdit | null
 }
 
 const initialState: DraftSliceState = {
@@ -32,13 +65,38 @@ const initialState: DraftSliceState = {
   teamPlayers: [],
   isTeamDraft: false,
   isBufferPeriod: false,
+  // Pause state
+  isPaused: false,
+  pausedBy: null,
+  pausedBySide: null,
+  // Edit state
+  editingSlot: null,
+  pendingEdit: null,
 }
 
 const draftSlice = createSlice({
   name: 'draft',
   initialState,
   reducers: {
-    syncState: (state, action: PayloadAction<DraftState & { yourSide: string; fearlessBans?: string[]; teamPlayers?: TeamPlayer[]; isTeamDraft?: boolean }>) => {
+    syncState: (state, action: PayloadAction<{
+      currentPhase: number
+      currentTeam: 'blue' | 'red' | null
+      actionType: 'ban' | 'pick' | null
+      timerRemainingMs: number
+      blueBans: string[]
+      redBans: string[]
+      bluePicks: string[]
+      redPicks: string[]
+      isComplete: boolean
+      yourSide: string
+      fearlessBans?: string[]
+      teamPlayers?: TeamPlayer[]
+      isTeamDraft?: boolean
+      isPaused?: boolean
+      pausedBy?: string | null
+      pausedBySide?: string | null
+      pendingEdit?: PendingEdit | null
+    }>) => {
       state.currentPhase = action.payload.currentPhase
       state.currentTeam = action.payload.currentTeam
       state.actionType = action.payload.actionType
@@ -52,6 +110,10 @@ const draftSlice = createSlice({
       state.fearlessBans = action.payload.fearlessBans || []
       state.teamPlayers = action.payload.teamPlayers || []
       state.isTeamDraft = action.payload.isTeamDraft || false
+      state.isPaused = action.payload.isPaused || false
+      state.pausedBy = action.payload.pausedBy || null
+      state.pausedBySide = (action.payload.pausedBySide as 'blue' | 'red') || null
+      state.pendingEdit = action.payload.pendingEdit || null
     },
     championSelected: (state, action: PayloadAction<{ phase: number; team: string; actionType: string; championId: string }>) => {
       const { team, actionType, championId } = action.payload
@@ -96,6 +158,65 @@ const draftSlice = createSlice({
       state.isComplete = true
     },
     resetDraft: () => initialState,
+
+    // Pause reducers
+    draftPaused: (state, action: PayloadAction<{
+      pausedBy: string
+      pausedBySide: 'blue' | 'red'
+      timerFrozenAt: number
+    }>) => {
+      state.isPaused = true
+      state.pausedBy = action.payload.pausedBy
+      state.pausedBySide = action.payload.pausedBySide
+      state.timerRemainingMs = action.payload.timerFrozenAt
+      state.isBufferPeriod = false
+    },
+
+    draftResumed: (state, action: PayloadAction<{
+      timerRemainingMs: number
+    }>) => {
+      state.isPaused = false
+      state.pausedBy = null
+      state.pausedBySide = null
+      state.timerRemainingMs = action.payload.timerRemainingMs
+      state.editingSlot = null
+      state.pendingEdit = null
+    },
+
+    // Edit reducers
+    setEditingSlot: (state, action: PayloadAction<EditingSlot>) => {
+      state.editingSlot = action.payload
+    },
+
+    clearEditingSlot: (state) => {
+      state.editingSlot = null
+    },
+
+    editProposed: (state, action: PayloadAction<PendingEdit>) => {
+      state.pendingEdit = action.payload
+      state.editingSlot = null
+    },
+
+    editApplied: (state, action: PayloadAction<{
+      slotType: 'ban' | 'pick'
+      team: 'blue' | 'red'
+      slotIndex: number
+      newChampionId: string
+      blueBans: string[]
+      redBans: string[]
+      bluePicks: string[]
+      redPicks: string[]
+    }>) => {
+      state.blueBans = action.payload.blueBans
+      state.redBans = action.payload.redBans
+      state.bluePicks = action.payload.bluePicks
+      state.redPicks = action.payload.redPicks
+      state.pendingEdit = null
+    },
+
+    editRejected: (state) => {
+      state.pendingEdit = null
+    },
   },
 })
 
@@ -107,6 +228,13 @@ export const {
   championHovered,
   draftCompleted,
   resetDraft,
+  draftPaused,
+  draftResumed,
+  setEditingSlot,
+  clearEditingSlot,
+  editProposed,
+  editApplied,
+  editRejected,
 } = draftSlice.actions
 
 export default draftSlice.reducer

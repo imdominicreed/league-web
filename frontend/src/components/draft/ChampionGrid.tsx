@@ -1,23 +1,40 @@
 import { useState, useMemo } from 'react'
-import { useSelector } from 'react-redux'
+import { useSelector, useDispatch } from 'react-redux'
 import { RootState } from '@/store'
+import { clearEditingSlot } from '@/store/slices/draftSlice'
 
 interface Props {
   onSelect: (championId: string) => void
   onLockIn: () => void
   onHover: (championId: string | null) => void
+  onProposeEdit?: (slotType: 'ban' | 'pick', team: 'blue' | 'red', slotIndex: number, championId: string) => void
   isYourTurn: boolean
   disabled: boolean
 }
 
 const ROLES = ['Fighter', 'Tank', 'Mage', 'Assassin', 'Marksman', 'Support']
 
-export default function ChampionGrid({ onSelect, onLockIn, onHover, isYourTurn, disabled }: Props) {
-  const { championsList } = useSelector((state: RootState) => state.champions)
+export default function ChampionGrid({ onSelect, onLockIn, onHover, onProposeEdit, isYourTurn, disabled }: Props) {
+  const dispatch = useDispatch()
+  const { championsList, champions } = useSelector((state: RootState) => state.champions)
   const draft = useSelector((state: RootState) => state.draft)
   const [selectedChampion, setSelectedChampion] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedRoles, setSelectedRoles] = useState<string[]>([])
+
+  // Edit mode state
+  const isEditMode = draft.isPaused && draft.editingSlot !== null
+
+  // Get the champion currently in the editing slot (if editing)
+  const editingSlotChampion = useMemo(() => {
+    if (!draft.editingSlot) return null
+    const { slotType, team, slotIndex } = draft.editingSlot
+    if (slotType === 'ban') {
+      return team === 'blue' ? draft.blueBans[slotIndex] : draft.redBans[slotIndex]
+    } else {
+      return team === 'blue' ? draft.bluePicks[slotIndex] : draft.redPicks[slotIndex]
+    }
+  }, [draft.editingSlot, draft.blueBans, draft.redBans, draft.bluePicks, draft.redPicks])
 
   const usedChampions = useMemo(() => {
     const used = new Set<string>()
@@ -26,8 +43,13 @@ export default function ChampionGrid({ onSelect, onLockIn, onHover, isYourTurn, 
     draft.bluePicks.forEach(id => used.add(id))
     draft.redPicks.forEach(id => used.add(id))
     draft.fearlessBans.forEach(id => used.add(id))
+    // In edit mode, exclude the champion currently in the slot being edited
+    // so it shows as available for re-selection
+    if (editingSlotChampion) {
+      used.delete(editingSlotChampion)
+    }
     return used
-  }, [draft.blueBans, draft.redBans, draft.bluePicks, draft.redPicks, draft.fearlessBans])
+  }, [draft.blueBans, draft.redBans, draft.bluePicks, draft.redPicks, draft.fearlessBans, editingSlotChampion])
 
   const filteredChampions = useMemo(() => {
     return championsList.filter(champ => {
@@ -42,11 +64,26 @@ export default function ChampionGrid({ onSelect, onLockIn, onHover, isYourTurn, 
   }, [championsList, searchTerm, selectedRoles])
 
   const handleChampionClick = (championId: string) => {
+    // Edit mode: propose the edit and clear editing slot
+    if (isEditMode && draft.editingSlot && onProposeEdit) {
+      if (usedChampions.has(championId)) return
+      const { slotType, team, slotIndex } = draft.editingSlot
+      onProposeEdit(slotType, team, slotIndex, championId)
+      dispatch(clearEditingSlot())
+      return
+    }
+
+    // Normal mode
     if (disabled || !isYourTurn || usedChampions.has(championId)) return
 
     setSelectedChampion(championId)
     onSelect(championId)
     onHover(championId)
+  }
+
+  // Cancel edit mode
+  const handleCancelEdit = () => {
+    dispatch(clearEditingSlot())
   }
 
   const handleMouseEnter = (championId: string) => {
@@ -82,8 +119,30 @@ export default function ChampionGrid({ onSelect, onLockIn, onHover, isYourTurn, 
   return (
     <div className="flex-1 flex flex-col min-h-0 p-6">
 
-      {/* Phase & Turn Indicator Banner */}
-      {(isBanning || isPicking) && (
+      {/* Edit Mode Banner */}
+      {isEditMode && draft.editingSlot && (
+        <div className="mb-4 rounded-lg border-2 p-3 text-center bg-green-900/30 border-green-700">
+          <div className="font-beaufort text-xl uppercase tracking-widest font-bold text-green-400">
+            ✏️ Edit Mode
+          </div>
+          <div className="mt-1 text-sm font-semibold text-lol-gold">
+            Select replacement for {draft.editingSlot.team === 'blue' ? 'Blue' : 'Red'}'s{' '}
+            {draft.editingSlot.slotType === 'ban' ? 'Ban' : 'Pick'} #{draft.editingSlot.slotIndex + 1}
+            {editingSlotChampion && champions[editingSlotChampion] && (
+              <span className="text-gray-400"> (currently {champions[editingSlotChampion].name})</span>
+            )}
+          </div>
+          <button
+            onClick={handleCancelEdit}
+            className="mt-2 px-4 py-1 bg-gray-600 hover:bg-gray-500 text-white rounded text-sm transition-colors"
+          >
+            Cancel Edit
+          </button>
+        </div>
+      )}
+
+      {/* Phase & Turn Indicator Banner (hidden during edit mode) */}
+      {!isEditMode && (isBanning || isPicking) && (
         <div className={`mb-4 rounded-lg border-2 p-3 text-center ${
           isBanning
             ? 'bg-red-900/30 border-red-700'
@@ -142,6 +201,10 @@ export default function ChampionGrid({ onSelect, onLockIn, onHover, isYourTurn, 
           {filteredChampions.map(champion => {
             const isUsed = usedChampions.has(champion.id)
             const isSelected = selectedChampion === champion.id
+            // In edit mode, enable all non-used champions
+            const isDisabledNormal = isUsed || disabled || !isYourTurn
+            const isDisabledEdit = isUsed
+            const isDisabled = isEditMode ? isDisabledEdit : isDisabledNormal
 
             return (
               <div key={champion.id} className="flex flex-col items-center gap-1">
@@ -149,14 +212,16 @@ export default function ChampionGrid({ onSelect, onLockIn, onHover, isYourTurn, 
                   onClick={() => handleChampionClick(champion.id)}
                   onMouseEnter={() => handleMouseEnter(champion.id)}
                   onMouseLeave={handleMouseLeave}
-                  disabled={isUsed || disabled || !isYourTurn}
+                  disabled={isDisabled}
                   className={`relative w-48 h-48 overflow-hidden transition-all duration-150 border ${
                     isUsed
                       ? 'opacity-40 grayscale cursor-not-allowed border-transparent'
                       : isSelected
                       ? 'border-lol-gold shadow-[0_0_10px_rgba(200,170,110,0.5)] scale-105 z-10'
+                      : isEditMode
+                      ? 'border-green-600 hover:border-green-400 hover:scale-105'
                       : 'border-lol-border hover:border-lol-gold-dark hover:scale-105'
-                  } ${!isYourTurn && !isUsed ? 'cursor-not-allowed opacity-70' : ''}`}
+                  } ${!isEditMode && !isYourTurn && !isUsed ? 'cursor-not-allowed opacity-70' : ''}`}
                 >
                   <img
                     src={champion.imageUrl}

@@ -1,7 +1,19 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import { RootState } from '@/store'
-import { syncState, championSelected, phaseChanged, updateTimer, championHovered, draftCompleted } from '@/store/slices/draftSlice'
+import {
+  syncState,
+  championSelected,
+  phaseChanged,
+  updateTimer,
+  championHovered,
+  draftCompleted,
+  draftPaused,
+  draftResumed,
+  editProposed,
+  editApplied,
+  editRejected,
+} from '@/store/slices/draftSlice'
 import { syncRoom, playerUpdate, updateRoomStatus, setConnectionStatus, setError } from '@/store/slices/roomSlice'
 import { WSMessage, StateSyncPayload } from '@/types'
 
@@ -72,6 +84,10 @@ export function useWebSocket(roomId: string, side: string) {
           fearlessBans: payload.fearlessBans,
           teamPlayers: payload.teamPlayers,
           isTeamDraft: payload.isTeamDraft,
+          isPaused: payload.draft.isPaused ?? false,
+          pausedBy: payload.draft.pausedBy ?? null,
+          pausedBySide: payload.draft.pausedBySide ?? null,
+          pendingEdit: payload.draft.pendingEdit ?? null,
         }))
         dispatch(syncRoom({
           room: {
@@ -115,6 +131,50 @@ export function useWebSocket(roomId: string, side: string) {
         console.error('Server error message:', (message.payload as { message: string }).message)
         dispatch(setError((message.payload as { message: string }).message))
         break
+
+      case 'DRAFT_PAUSED':
+        dispatch(draftPaused(message.payload as {
+          pausedBy: string
+          pausedBySide: 'blue' | 'red'
+          timerFrozenAt: number
+        }))
+        break
+
+      case 'DRAFT_RESUMED':
+        dispatch(draftResumed(message.payload as {
+          timerRemainingMs: number
+        }))
+        break
+
+      case 'EDIT_PROPOSED':
+        dispatch(editProposed(message.payload as {
+          proposedBy: string
+          proposedSide: 'blue' | 'red'
+          slotType: 'ban' | 'pick'
+          team: 'blue' | 'red'
+          slotIndex: number
+          oldChampionId: string
+          newChampionId: string
+          expiresAt: number
+        }))
+        break
+
+      case 'EDIT_APPLIED':
+        dispatch(editApplied(message.payload as {
+          slotType: 'ban' | 'pick'
+          team: 'blue' | 'red'
+          slotIndex: number
+          newChampionId: string
+          blueBans: string[]
+          redBans: string[]
+          bluePicks: string[]
+          redPicks: string[]
+        }))
+        break
+
+      case 'EDIT_REJECTED':
+        dispatch(editRejected())
+        break
     }
   }
 
@@ -148,6 +208,26 @@ export function useWebSocket(roomId: string, side: string) {
     send('START_DRAFT', {})
   }, [send])
 
+  const pauseDraft = useCallback(() => {
+    send('PAUSE_DRAFT', {})
+  }, [send])
+
+  const resumeDraft = useCallback(() => {
+    send('RESUME_DRAFT', {})
+  }, [send])
+
+  const proposeEdit = useCallback((slotType: 'ban' | 'pick', team: 'blue' | 'red', slotIndex: number, championId: string) => {
+    send('PROPOSE_EDIT', { slotType, team, slotIndex, championId })
+  }, [send])
+
+  const confirmEdit = useCallback(() => {
+    send('CONFIRM_EDIT', {})
+  }, [send])
+
+  const rejectEdit = useCallback(() => {
+    send('REJECT_EDIT', {})
+  }, [send])
+
   useEffect(() => {
     connect()
 
@@ -166,6 +246,11 @@ export function useWebSocket(roomId: string, side: string) {
     hoverChampion,
     setReady,
     startDraft,
+    pauseDraft,
+    resumeDraft,
+    proposeEdit,
+    confirmEdit,
+    rejectEdit,
     send,
   }
 }

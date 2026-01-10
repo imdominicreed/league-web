@@ -1,5 +1,6 @@
-import { useSelector } from 'react-redux'
+import { useSelector, useDispatch } from 'react-redux'
 import { RootState } from '@/store'
+import { setEditingSlot } from '@/store/slices/draftSlice'
 import { Player, Champion, TeamPlayer, Role, ALL_ROLES, ROLE_ABBREVIATIONS } from '@/types'
 
 interface Props {
@@ -25,11 +26,16 @@ const ROLE_TO_SLOT_INDEX: Record<Role, number> = {
 }
 
 export default function TeamPanel({ side, player, picks, isActive, hoveredChampion }: Props) {
+  const dispatch = useDispatch()
   const { champions } = useSelector((state: RootState) => state.champions)
   const draft = useSelector((state: RootState) => state.draft)
+  const { isCaptain } = useSelector((state: RootState) => state.room)
 
   const teamColor = side === 'blue' ? 'blue-team' : 'red-team'
   const borderColor = side === 'blue' ? 'border-blue-team' : 'border-red-team'
+
+  // Check if slots are editable (paused and user is captain)
+  const canEdit = draft.isPaused && isCaptain
 
   // For current pick, show hovered champion
   const currentActionChampion = isActive && hoveredChampion ? hoveredChampion : null
@@ -47,6 +53,16 @@ export default function TeamPanel({ side, player, picks, isActive, hoveredChampi
     playersByRole[p.assignedRole] = p
   })
 
+  // Handle click on a pick slot for editing
+  const handleSlotClick = (slotIndex: number) => {
+    if (!canEdit || !picks[slotIndex]) return
+    dispatch(setEditingSlot({
+      slotType: 'pick',
+      team: side,
+      slotIndex,
+    }))
+  }
+
   // Render a single pick slot
   const renderPickSlot = (
     slotIndex: number,
@@ -61,12 +77,23 @@ export default function TeamPanel({ side, player, picks, isActive, hoveredChampi
     // In team draft mode, highlight captain's row when it's their team's turn
     const isCaptainRow = isTeamDraft && teamPlayer?.isCaptain && isActive
 
+    // Check if this slot is being edited
+    const isEditing = draft.editingSlot?.slotType === 'pick' &&
+      draft.editingSlot?.team === side &&
+      draft.editingSlot?.slotIndex === slotIndex
+
+    // Slot is clickable if paused, user is captain, and slot has a champion
+    const isClickable = canEdit && champion
+
     return (
       <div
         key={slotIndex}
+        onClick={() => isClickable && handleSlotClick(slotIndex)}
         className={`flex-1 relative overflow-hidden border-b border-lol-border last:border-b-0 ${
           isCurrentPick ? 'ring-2 ring-inset ring-lol-gold animate-pulse' : ''
-        } ${isCaptainRow ? 'ring-1 ring-inset ring-lol-gold/50' : ''}`}
+        } ${isCaptainRow ? 'ring-1 ring-inset ring-lol-gold/50' : ''} ${
+          isEditing ? 'ring-2 ring-inset ring-green-500' : ''
+        } ${isClickable ? 'cursor-pointer hover:brightness-110' : ''}`}
       >
         {/* Role and Player Info overlay */}
         {role && (
@@ -99,6 +126,12 @@ export default function TeamPanel({ side, player, picks, isActive, hoveredChampi
             />
             {/* Gradient overlay for text readability */}
             <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+            {/* Edit icon overlay when slot is clickable */}
+            {isClickable && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 hover:opacity-100 transition-opacity">
+                <span className="text-white text-2xl">✏️</span>
+              </div>
+            )}
             {/* Champion name */}
             <div className="absolute bottom-0 left-0 right-0 p-1">
               <div className="text-lol-gold text-sm font-beaufort uppercase tracking-wider font-semibold truncate">

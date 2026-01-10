@@ -22,6 +22,17 @@ export interface Room {
   redSideUserId?: string
 }
 
+export interface PendingEditInfo {
+  proposedBy: string
+  proposedSide: 'blue' | 'red'
+  slotType: 'ban' | 'pick'
+  team: 'blue' | 'red'
+  slotIndex: number
+  oldChampionId: string
+  newChampionId: string
+  expiresAt: number
+}
+
 export interface DraftState {
   currentPhase: number
   currentTeam: 'blue' | 'red' | null
@@ -34,6 +45,11 @@ export interface DraftState {
   isComplete: boolean
   teamPlayers?: TeamPlayer[]
   isTeamDraft?: boolean
+  // Pause fields (optional in base type, required in Redux state)
+  isPaused?: boolean
+  pausedBy?: string
+  pausedBySide?: 'blue' | 'red'
+  pendingEdit?: PendingEditInfo
 }
 
 export interface Player {

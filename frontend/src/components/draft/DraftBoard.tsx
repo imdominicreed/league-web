@@ -3,6 +3,9 @@ import { RootState } from '@/store'
 import TeamPanel from './TeamPanel'
 import ChampionGrid from './ChampionGrid'
 import BanBar from './BanBar'
+import PauseControls from './PauseControls'
+import EditConfirmModal from './EditConfirmModal'
+import DraftTimer from './DraftTimer'
 
 interface Props {
   ws: {
@@ -12,31 +15,64 @@ interface Props {
     hoverChampion: (id: string | null) => void
     setReady: (ready: boolean) => void
     startDraft: () => void
+    pauseDraft: () => void
+    resumeDraft: () => void
+    proposeEdit: (slotType: 'ban' | 'pick', team: 'blue' | 'red', slotIndex: number, championId: string) => void
+    confirmEdit: () => void
+    rejectEdit: () => void
   }
 }
 
 export default function DraftBoard({ ws }: Props) {
   const { room, players, isCaptain } = useSelector((state: RootState) => state.room)
   const draft = useSelector((state: RootState) => state.draft)
+  const { champions } = useSelector((state: RootState) => state.champions)
 
   if (!room) return null
 
   const isWaiting = room.status === 'waiting'
   const isYourTurn = isCaptain && draft.yourSide === draft.currentTeam
+  const isDraftActive = room.status === 'in_progress' && !draft.isComplete
+
+  // Create a Map for EditConfirmModal
+  const championsMap = new Map(
+    Object.entries(champions).map(([id, champ]) => [id, { name: champ.name, imageUrl: champ.imageUrl }])
+  )
 
   return (
     <div className="h-screen flex flex-col bg-lol-dark overflow-hidden">
-      {/* Top Bar with Room Code and Connection Status */}
+      {/* Top Bar with Room Code, Pause Controls, and Connection Status */}
       <header className="bg-lol-dark-blue/80 border-b border-lol-border px-3 py-1 flex items-center justify-between">
         <div className="text-xs text-lol-gold-light">
           Room: <span className="font-mono text-lol-gold">{room.shortCode}</span>
         </div>
+
+        {/* Center: Timer and Pause Controls */}
+        <div className="flex items-center gap-4">
+          {isDraftActive && (
+            <>
+              <DraftTimer />
+              <PauseControls
+                onPause={ws.pauseDraft}
+                onResume={ws.resumeDraft}
+              />
+            </>
+          )}
+        </div>
+
         <div className="flex items-center gap-2">
           {!ws.isConnected && (
             <span className="text-red-team text-xs">Disconnected</span>
           )}
         </div>
       </header>
+
+      {/* Edit Confirm Modal */}
+      <EditConfirmModal
+        onConfirm={ws.confirmEdit}
+        onReject={ws.rejectEdit}
+        champions={championsMap}
+      />
 
       {/* Ban Bar with Timer */}
       <BanBar
@@ -130,6 +166,7 @@ export default function DraftBoard({ ws }: Props) {
               onSelect={ws.selectChampion}
               onLockIn={ws.lockIn}
               onHover={ws.hoverChampion}
+              onProposeEdit={ws.proposeEdit}
               isYourTurn={isYourTurn}
               disabled={draft.isComplete}
             />

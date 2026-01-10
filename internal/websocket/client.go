@@ -168,6 +168,39 @@ func (c *Client) handleMessage(msg *Message) {
 		if c.room != nil {
 			c.room.syncState <- c
 		}
+
+	case MessageTypePauseDraft:
+		if c.room != nil {
+			c.room.pauseDraft <- c
+		}
+
+	case MessageTypeResumeDraft:
+		if c.room != nil {
+			c.room.resumeDraft <- c
+		}
+
+	case MessageTypeProposeEdit:
+		var payload ProposeEditPayload
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+			c.sendError("INVALID_PAYLOAD", "Invalid propose edit payload")
+			return
+		}
+		if c.room != nil {
+			c.room.proposeEdit <- &ProposeEditRequest{
+				Client:  c,
+				Payload: payload,
+			}
+		}
+
+	case MessageTypeConfirmEdit:
+		if c.room != nil {
+			c.room.confirmEdit <- c
+		}
+
+	case MessageTypeRejectEdit:
+		if c.room != nil {
+			c.room.rejectEdit <- c
+		}
 	}
 }
 

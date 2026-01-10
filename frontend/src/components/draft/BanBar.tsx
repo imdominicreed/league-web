@@ -1,5 +1,6 @@
-import { useSelector } from 'react-redux'
+import { useSelector, useDispatch } from 'react-redux'
 import { RootState } from '@/store'
+import { setEditingSlot } from '@/store/slices/draftSlice'
 
 interface Props {
   blueBans: string[]
@@ -9,9 +10,10 @@ interface Props {
 }
 
 export default function BanBar({ blueBans, redBans, isBlueActive, isRedActive }: Props) {
+  const dispatch = useDispatch()
   const { champions } = useSelector((state: RootState) => state.champions)
-  const { timerRemainingMs, isComplete, currentTeam, actionType } = useSelector((state: RootState) => state.draft)
-  const { room } = useSelector((state: RootState) => state.room)
+  const { timerRemainingMs, isComplete, currentTeam, actionType, isPaused, editingSlot } = useSelector((state: RootState) => state.draft)
+  const { room, isCaptain } = useSelector((state: RootState) => state.room)
 
   const isWaiting = !room || room.status === 'waiting'
   const isBanning = actionType === 'ban'
@@ -20,20 +22,44 @@ export default function BanBar({ blueBans, redBans, isBlueActive, isRedActive }:
   const isLow = seconds <= 10
   const isCritical = seconds <= 5
 
+  // Check if slots are editable (paused and user is captain)
+  const canEdit = isPaused && isCaptain
+
+  // Handle click on a ban slot for editing
+  const handleBanSlotClick = (side: 'blue' | 'red', slotIndex: number, hasChampion: boolean) => {
+    if (!canEdit || !hasChampion) return
+    dispatch(setEditingSlot({
+      slotType: 'ban',
+      team: side,
+      slotIndex,
+    }))
+  }
+
   const renderBanSlot = (championId: string | undefined, index: number, isActive: boolean, side: 'blue' | 'red') => {
     const champion = championId ? champions[championId] : null
     const isCurrentBan = isBanning && isActive && (side === 'blue' ? blueBans.length : redBans.length) === index
 
+    // Check if this slot is being edited
+    const isEditing = editingSlot?.slotType === 'ban' &&
+      editingSlot?.team === side &&
+      editingSlot?.slotIndex === index
+
+    // Slot is clickable if paused, user is captain, and slot has a champion
+    const isClickable = canEdit && champion
+
     return (
       <div key={index} className="flex flex-col items-center gap-1">
         <div
+          onClick={() => isClickable && handleBanSlotClick(side, index, !!champion)}
           className={`relative w-16 h-16 rounded-full overflow-hidden border-2 transition-all ${
             isCurrentBan
               ? 'border-lol-gold shadow-[0_0_8px_rgba(200,170,110,0.5)] animate-pulse'
+              : isEditing
+              ? 'border-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]'
               : champion
               ? 'border-lol-border'
               : 'border-lol-gray'
-          } bg-lol-dark-blue`}
+          } ${isClickable ? 'cursor-pointer hover:brightness-110' : ''} bg-lol-dark-blue`}
         >
           {champion ? (
             <>
@@ -48,6 +74,12 @@ export default function BanBar({ blueBans, redBans, isBlueActive, isRedActive }:
                   <path d="M6 6L18 18M6 18L18 6" />
                 </svg>
               </div>
+              {/* Edit icon overlay when slot is clickable */}
+              {isClickable && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 hover:opacity-100 transition-opacity rounded-full">
+                  <span className="text-white text-lg">✏️</span>
+                </div>
+              )}
             </>
           ) : null}
         </div>

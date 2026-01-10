@@ -16,6 +16,11 @@ const (
 	MessageTypeSyncState       MessageType = "SYNC_STATE"
 	MessageTypeReady           MessageType = "READY"
 	MessageTypeStartDraft      MessageType = "START_DRAFT"
+	MessageTypePauseDraft      MessageType = "PAUSE_DRAFT"
+	MessageTypeResumeDraft     MessageType = "RESUME_DRAFT"
+	MessageTypeProposeEdit     MessageType = "PROPOSE_EDIT"
+	MessageTypeConfirmEdit     MessageType = "CONFIRM_EDIT"
+	MessageTypeRejectEdit      MessageType = "REJECT_EDIT"
 
 	// Server to Client
 	MessageTypeStateSync        MessageType = "STATE_SYNC"
@@ -27,6 +32,11 @@ const (
 	MessageTypeTimerTick        MessageType = "TIMER_TICK"
 	MessageTypeTimerExpired     MessageType = "TIMER_EXPIRED"
 	MessageTypeDraftCompleted   MessageType = "DRAFT_COMPLETED"
+	MessageTypeDraftPaused      MessageType = "DRAFT_PAUSED"
+	MessageTypeDraftResumed     MessageType = "DRAFT_RESUMED"
+	MessageTypeEditProposed     MessageType = "EDIT_PROPOSED"
+	MessageTypeEditApplied      MessageType = "EDIT_APPLIED"
+	MessageTypeEditRejected     MessageType = "EDIT_REJECTED"
 	MessageTypeError            MessageType = "ERROR"
 )
 
@@ -108,6 +118,21 @@ type DraftInfo struct {
 	BluePicks        []string `json:"bluePicks"`
 	RedPicks         []string `json:"redPicks"`
 	IsComplete       bool     `json:"isComplete"`
+	IsPaused         bool     `json:"isPaused"`
+	PausedBy         string   `json:"pausedBy,omitempty"`
+	PausedBySide     string   `json:"pausedBySide,omitempty"`
+	PendingEdit      *PendingEditInfo `json:"pendingEdit,omitempty"`
+}
+
+type PendingEditInfo struct {
+	ProposedBy    string `json:"proposedBy"`
+	ProposedSide  string `json:"proposedSide"`
+	SlotType      string `json:"slotType"`
+	Team          string `json:"team"`
+	SlotIndex     int    `json:"slotIndex"`
+	OldChampionID string `json:"oldChampionId"`
+	NewChampionID string `json:"newChampionId"`
+	ExpiresAt     int64  `json:"expiresAt"`
 }
 
 type PlayersInfo struct {
@@ -173,4 +198,53 @@ type DraftCompletedPayload struct {
 type ErrorPayload struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+}
+
+// Pause/Edit payloads
+
+type ProposeEditPayload struct {
+	SlotType   string `json:"slotType"`   // "ban" or "pick"
+	Team       string `json:"team"`       // "blue" or "red"
+	SlotIndex  int    `json:"slotIndex"`  // 0-4 for picks, 0-4 for bans
+	ChampionID string `json:"championId"` // New champion to put in slot
+}
+
+type DraftPausedPayload struct {
+	PausedBy         string `json:"pausedBy"`
+	PausedBySide     string `json:"pausedBySide"`
+	TimerFrozenAt    int    `json:"timerFrozenAt"`
+	MaxPauseDuration int    `json:"maxPauseDuration"`
+}
+
+type DraftResumedPayload struct {
+	ResumedBy        string `json:"resumedBy"`
+	TimerRemainingMs int    `json:"timerRemainingMs"`
+}
+
+type EditProposedPayload struct {
+	ProposedBy    string `json:"proposedBy"`
+	ProposedSide  string `json:"proposedSide"`
+	SlotType      string `json:"slotType"`
+	Team          string `json:"team"`
+	SlotIndex     int    `json:"slotIndex"`
+	OldChampionID string `json:"oldChampionId"`
+	NewChampionID string `json:"newChampionId"`
+	ExpiresAt     int64  `json:"expiresAt"`
+}
+
+type EditAppliedPayload struct {
+	SlotType      string   `json:"slotType"`
+	Team          string   `json:"team"`
+	SlotIndex     int      `json:"slotIndex"`
+	OldChampionID string   `json:"oldChampionId"`
+	NewChampionID string   `json:"newChampionId"`
+	BlueBans      []string `json:"blueBans"`
+	RedBans       []string `json:"redBans"`
+	BluePicks     []string `json:"bluePicks"`
+	RedPicks      []string `json:"redPicks"`
+}
+
+type EditRejectedPayload struct {
+	RejectedBy   string `json:"rejectedBy"`
+	RejectedSide string `json:"rejectedSide"`
 }
