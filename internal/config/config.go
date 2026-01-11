@@ -32,7 +32,7 @@ func Load() (*Config, error) {
 		Environment:          getEnv("ENVIRONMENT", "development"),
 		DatabaseURL:          getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5431/league_draft?sslmode=disable"),
 		JWTSecret:            getEnv("JWT_SECRET", ""),
-		JWTExpirationHours:   getEnvInt("JWT_EXPIRATION_HOURS", 24),
+		JWTExpirationHours:   getEnvInt("JWT_EXPIRATION_HOURS", 876000), // ~100 years for local dev
 		DefaultTimerDuration: time.Duration(getEnvInt("DEFAULT_TIMER_SECONDS", 30)) * time.Second,
 		DataDragonVersion:    getEnv("DDRAGON_VERSION", ""),
 	}
