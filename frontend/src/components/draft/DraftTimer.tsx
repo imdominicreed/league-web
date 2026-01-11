@@ -2,7 +2,7 @@ import { useSelector } from 'react-redux'
 import { RootState } from '@/store'
 
 export default function DraftTimer() {
-  const { timerRemainingMs, isComplete, currentTeam, isBufferPeriod, isPaused, pausedBy } = useSelector((state: RootState) => state.draft)
+  const { timerRemainingMs, isComplete, currentTeam, isBufferPeriod, isPaused, pausedBy, resumeCountdown } = useSelector((state: RootState) => state.draft)
   const { room } = useSelector((state: RootState) => state.room)
 
   if (!room || room.status === 'waiting') {
@@ -19,6 +19,25 @@ export default function DraftTimer() {
 
   // Paused state
   if (isPaused) {
+    // Show countdown when resuming
+    if (resumeCountdown > 0) {
+      return (
+        <div className="text-center">
+          <div className="relative">
+            <div className="absolute inset-0 bg-green-600 rounded-lg animate-pulse opacity-20" />
+            <div className="relative px-4 py-2">
+              <div className="text-5xl font-bold font-mono text-green-500">
+                {resumeCountdown}
+              </div>
+              <div className="text-sm text-green-400 mt-1">
+                Resuming...
+              </div>
+            </div>
+          </div>
+        </div>
+      )
+    }
+
     return (
       <div className="text-center">
         <div className="relative">

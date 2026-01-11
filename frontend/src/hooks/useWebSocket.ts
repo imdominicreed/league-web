@@ -13,6 +13,8 @@ import {
   editProposed,
   editApplied,
   editRejected,
+  resumeReadyUpdate,
+  resumeCountdownUpdate,
 } from '@/store/slices/draftSlice'
 import { syncRoom, playerUpdate, updateRoomStatus, setConnectionStatus, setError } from '@/store/slices/roomSlice'
 import { WSMessage, StateSyncPayload } from '@/types'
@@ -88,6 +90,9 @@ export function useWebSocket(roomId: string, side: string) {
           pausedBy: payload.draft.pausedBy ?? null,
           pausedBySide: payload.draft.pausedBySide ?? null,
           pendingEdit: payload.draft.pendingEdit ?? null,
+          blueResumeReady: payload.draft.blueResumeReady ?? false,
+          redResumeReady: payload.draft.redResumeReady ?? false,
+          resumeCountdown: payload.draft.resumeCountdown ?? 0,
         }))
         dispatch(syncRoom({
           room: {
@@ -175,6 +180,20 @@ export function useWebSocket(roomId: string, side: string) {
       case 'EDIT_REJECTED':
         dispatch(editRejected())
         break
+
+      case 'RESUME_READY_UPDATE':
+        dispatch(resumeReadyUpdate(message.payload as {
+          blueReady: boolean
+          redReady: boolean
+        }))
+        break
+
+      case 'RESUME_COUNTDOWN':
+        dispatch(resumeCountdownUpdate(message.payload as {
+          secondsRemaining: number
+          cancelledBy?: string
+        }))
+        break
     }
   }
 
@@ -228,6 +247,10 @@ export function useWebSocket(roomId: string, side: string) {
     send('REJECT_EDIT', {})
   }, [send])
 
+  const readyToResume = useCallback((ready: boolean) => {
+    send('READY_TO_RESUME', { ready })
+  }, [send])
+
   useEffect(() => {
     connect()
 
@@ -251,6 +274,7 @@ export function useWebSocket(roomId: string, side: string) {
     proposeEdit,
     confirmEdit,
     rejectEdit,
+    readyToResume,
     send,
   }
 }

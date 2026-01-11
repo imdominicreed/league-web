@@ -54,6 +54,12 @@ type Room struct {
 	pendingEdit  *PendingEdit
 	editTimeout  *time.Timer
 
+	// Resume ready state (during pause)
+	blueResumeReady       bool
+	redResumeReady        bool
+	resumeCountdown       int
+	resumeCountdownCancel chan struct{}
+
 	// Channels
 	join           chan *Client
 	leave          chan *Client
@@ -69,6 +75,7 @@ type Room struct {
 	proposeEdit    chan *ProposeEditRequest
 	confirmEdit    chan *Client
 	rejectEdit     chan *Client
+	readyToResume  chan *ReadyToResumeRequest
 
 	mu sync.RWMutex
 }
@@ -118,6 +125,11 @@ type ReadyRequest struct {
 	Ready  bool
 }
 
+type ReadyToResumeRequest struct {
+	Client *Client
+	Ready  bool
+}
+
 func NewRoom(id uuid.UUID, shortCode string, timerDurationMs int, userRepo repository.UserRepository, championRepo repository.ChampionRepository) *Room {
 	return &Room{
 		id:               id,
@@ -152,6 +164,7 @@ func NewRoom(id uuid.UUID, shortCode string, timerDurationMs int, userRepo repos
 		proposeEdit:        make(chan *ProposeEditRequest),
 		confirmEdit:        make(chan *Client),
 		rejectEdit:         make(chan *Client),
+		readyToResume:      make(chan *ReadyToResumeRequest),
 	}
 }
 
@@ -267,6 +280,9 @@ func (r *Room) Run() {
 
 		case client := <-r.rejectEdit:
 			r.handleRejectEdit(client)
+
+		case req := <-r.readyToResume:
+			r.handleReadyToResume(req)
 		}
 	}
 }
@@ -928,6 +944,9 @@ func (r *Room) sendStateSyncLocked(client *Client) {
 			PausedBy:         pausedByName,
 			PausedBySide:     r.pausedBySide,
 			PendingEdit:      pendingEditInfo,
+			BlueResumeReady:  r.blueResumeReady,
+			RedResumeReady:   r.redResumeReady,
+			ResumeCountdown:  r.resumeCountdown,
 		},
 		Players: PlayersInfo{
 			Blue: bluePlayer,
@@ -997,6 +1016,11 @@ func (r *Room) handlePauseDraft(client *Client) {
 	r.pausedBySide = client.side
 	r.pausedAt = time.Now()
 
+	// Reset resume-ready state
+	r.blueResumeReady = false
+	r.redResumeReady = false
+	r.resumeCountdown = 0
+
 	// Start auto-resume timer (5 minutes)
 	r.pauseTimer = time.AfterFunc(
 		time.Duration(r.maxPauseDurationMs)*time.Millisecond,
@@ -1016,56 +1040,12 @@ func (r *Room) handlePauseDraft(client *Client) {
 }
 
 // handleResumeDraft handles a resume request from a client
+// Now forwards to the ready-to-resume system (clicking Resume = set ready)
 func (r *Room) handleResumeDraft(client *Client) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if !r.isPaused {
-		client.sendError("INVALID_STATE", "Draft is not paused")
-		return
+	r.readyToResume <- &ReadyToResumeRequest{
+		Client: client,
+		Ready:  true,
 	}
-
-	// Authorization: either captain can resume
-	if r.isTeamDraft && !r.isCaptain(client.userID, client.side) {
-		client.sendError("UNAUTHORIZED", "Only captains can resume")
-		return
-	}
-
-	// In 1v1 mode, only players can resume
-	if !r.isTeamDraft && client.side != "blue" && client.side != "red" {
-		client.sendError("UNAUTHORIZED", "Only players can resume")
-		return
-	}
-
-	// Clear any pending edit
-	r.clearPendingEdit()
-
-	// Stop auto-resume timer
-	if r.pauseTimer != nil {
-		r.pauseTimer.Stop()
-	}
-
-	// Save remaining time before clearing pause state
-	remainingMs := r.pauseRemainingMs
-
-	// Clear pause state
-	r.isPaused = false
-	r.pausedBy = nil
-	r.pausedBySide = ""
-
-	log.Printf("Draft resumed by %s, timer restarting from %dms", client.userID, remainingMs)
-
-	// Broadcast resume
-	msg, _ := NewMessage(MessageTypeDraftResumed, DraftResumedPayload{
-		ResumedBy:        r.getUserDisplayName(client.userID),
-		TimerRemainingMs: remainingMs,
-	})
-	r.broadcastMessageLocked(msg)
-
-	// Restart timer from saved position
-	r.timerStartedAt = time.Now()
-	r.timerDurationMs = remainingMs
-	r.startTimer()
 }
 
 // handleAutoResume is called when the pause timer expires
@@ -1077,22 +1057,201 @@ func (r *Room) handleAutoResume() {
 		return
 	}
 
+	// Cancel any ongoing countdown
+	if r.resumeCountdownCancel != nil {
+		close(r.resumeCountdownCancel)
+		r.resumeCountdownCancel = nil
+	}
+
 	// Clear any pending edit
 	r.clearPendingEdit()
 
 	// Save remaining time before clearing pause state
 	remainingMs := r.pauseRemainingMs
 
-	// Clear pause state
+	// Clear pause state and resume-ready state
 	r.isPaused = false
 	r.pausedBy = nil
 	r.pausedBySide = ""
+	r.blueResumeReady = false
+	r.redResumeReady = false
+	r.resumeCountdown = 0
 
 	log.Printf("Draft auto-resumed after pause timeout, timer restarting from %dms", remainingMs)
 
 	// Broadcast resume
 	msg, _ := NewMessage(MessageTypeDraftResumed, DraftResumedPayload{
 		ResumedBy:        "System (timeout)",
+		TimerRemainingMs: remainingMs,
+	})
+	r.broadcastMessageLocked(msg)
+
+	// Restart timer from saved position
+	r.timerStartedAt = time.Now()
+	r.timerDurationMs = remainingMs
+	r.startTimer()
+}
+
+// handleReadyToResume handles a ready-to-resume toggle from a client
+func (r *Room) handleReadyToResume(req *ReadyToResumeRequest) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	client := req.Client
+
+	// Must be paused
+	if !r.isPaused {
+		client.sendError("INVALID_STATE", "Draft is not paused")
+		return
+	}
+
+	// Must be a captain
+	if r.isTeamDraft && !r.isCaptain(client.userID, client.side) {
+		client.sendError("UNAUTHORIZED", "Only captains can ready to resume")
+		return
+	}
+
+	// In 1v1 mode, must be a player
+	if !r.isTeamDraft && client.side != "blue" && client.side != "red" {
+		client.sendError("UNAUTHORIZED", "Only players can ready to resume")
+		return
+	}
+
+	// If countdown is in progress and someone un-readies, cancel it
+	if r.resumeCountdown > 0 && !req.Ready {
+		r.cancelResumeCountdown(client)
+		return
+	}
+
+	// Update ready state
+	if client.side == "blue" {
+		r.blueResumeReady = req.Ready
+	} else {
+		r.redResumeReady = req.Ready
+	}
+
+	// Broadcast ready update
+	msg, _ := NewMessage(MessageTypeResumeReadyUpdate, ResumeReadyUpdatePayload{
+		BlueReady: r.blueResumeReady,
+		RedReady:  r.redResumeReady,
+	})
+	r.broadcastMessageLocked(msg)
+
+	// Check if both ready - start countdown
+	if r.blueResumeReady && r.redResumeReady && r.resumeCountdown == 0 {
+		r.startResumeCountdown()
+	}
+}
+
+// startResumeCountdown starts the 5-second countdown before resuming
+func (r *Room) startResumeCountdown() {
+	r.resumeCountdown = 5
+	r.resumeCountdownCancel = make(chan struct{})
+
+	// Broadcast initial countdown
+	msg, _ := NewMessage(MessageTypeResumeCountdown, ResumeCountdownPayload{
+		SecondsRemaining: 5,
+	})
+	r.broadcastMessageLocked(msg)
+
+	log.Printf("Resume countdown started (5 seconds)")
+
+	// Start countdown in goroutine
+	go r.runResumeCountdownTicker()
+}
+
+// runResumeCountdownTicker ticks down the resume countdown
+func (r *Room) runResumeCountdownTicker() {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.resumeCountdownCancel:
+			return
+		case <-ticker.C:
+			r.mu.Lock()
+
+			if r.resumeCountdown <= 0 {
+				r.mu.Unlock()
+				return
+			}
+
+			r.resumeCountdown--
+
+			if r.resumeCountdown <= 0 {
+				// Countdown complete - resume draft
+				r.doResumeDraft()
+				r.mu.Unlock()
+				return
+			}
+
+			// Broadcast countdown tick
+			msg, _ := NewMessage(MessageTypeResumeCountdown, ResumeCountdownPayload{
+				SecondsRemaining: r.resumeCountdown,
+			})
+			r.broadcastMessageLocked(msg)
+			r.mu.Unlock()
+		}
+	}
+}
+
+// cancelResumeCountdown cancels an ongoing resume countdown
+func (r *Room) cancelResumeCountdown(client *Client) {
+	// Stop countdown goroutine
+	if r.resumeCountdownCancel != nil {
+		close(r.resumeCountdownCancel)
+		r.resumeCountdownCancel = nil
+	}
+
+	// Reset state
+	r.resumeCountdown = 0
+	r.blueResumeReady = false
+	r.redResumeReady = false
+
+	log.Printf("Resume countdown cancelled by %s", client.userID)
+
+	// Broadcast cancellation
+	msg, _ := NewMessage(MessageTypeResumeCountdown, ResumeCountdownPayload{
+		SecondsRemaining: 0,
+		CancelledBy:      r.getUserDisplayName(client.userID),
+	})
+	r.broadcastMessageLocked(msg)
+
+	// Broadcast ready update (both false)
+	readyMsg, _ := NewMessage(MessageTypeResumeReadyUpdate, ResumeReadyUpdatePayload{
+		BlueReady: false,
+		RedReady:  false,
+	})
+	r.broadcastMessageLocked(readyMsg)
+}
+
+// doResumeDraft actually resumes the draft after countdown completes
+func (r *Room) doResumeDraft() {
+	// Clear any pending edit
+	r.clearPendingEdit()
+
+	// Stop auto-resume timer
+	if r.pauseTimer != nil {
+		r.pauseTimer.Stop()
+	}
+
+	// Save remaining time
+	remainingMs := r.pauseRemainingMs
+
+	// Clear pause and resume-ready state
+	r.isPaused = false
+	r.pausedBy = nil
+	r.pausedBySide = ""
+	r.blueResumeReady = false
+	r.redResumeReady = false
+	r.resumeCountdown = 0
+
+	log.Printf("Draft resumed after countdown, timer restarting from %dms", remainingMs)
+
+	// Broadcast resume
+	msg, _ := NewMessage(MessageTypeDraftResumed, DraftResumedPayload{
+		ResumedBy:        "Both players ready",
 		TimerRemainingMs: remainingMs,
 	})
 	r.broadcastMessageLocked(msg)

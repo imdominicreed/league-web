@@ -21,6 +21,7 @@ const (
 	MessageTypeProposeEdit     MessageType = "PROPOSE_EDIT"
 	MessageTypeConfirmEdit     MessageType = "CONFIRM_EDIT"
 	MessageTypeRejectEdit      MessageType = "REJECT_EDIT"
+	MessageTypeReadyToResume   MessageType = "READY_TO_RESUME"
 
 	// Server to Client
 	MessageTypeStateSync        MessageType = "STATE_SYNC"
@@ -34,10 +35,12 @@ const (
 	MessageTypeDraftCompleted   MessageType = "DRAFT_COMPLETED"
 	MessageTypeDraftPaused      MessageType = "DRAFT_PAUSED"
 	MessageTypeDraftResumed     MessageType = "DRAFT_RESUMED"
-	MessageTypeEditProposed     MessageType = "EDIT_PROPOSED"
-	MessageTypeEditApplied      MessageType = "EDIT_APPLIED"
-	MessageTypeEditRejected     MessageType = "EDIT_REJECTED"
-	MessageTypeError            MessageType = "ERROR"
+	MessageTypeEditProposed      MessageType = "EDIT_PROPOSED"
+	MessageTypeEditApplied       MessageType = "EDIT_APPLIED"
+	MessageTypeEditRejected      MessageType = "EDIT_REJECTED"
+	MessageTypeResumeReadyUpdate MessageType = "RESUME_READY_UPDATE"
+	MessageTypeResumeCountdown   MessageType = "RESUME_COUNTDOWN"
+	MessageTypeError             MessageType = "ERROR"
 )
 
 type Message struct {
@@ -122,6 +125,9 @@ type DraftInfo struct {
 	PausedBy         string   `json:"pausedBy,omitempty"`
 	PausedBySide     string   `json:"pausedBySide,omitempty"`
 	PendingEdit      *PendingEditInfo `json:"pendingEdit,omitempty"`
+	BlueResumeReady  bool     `json:"blueResumeReady,omitempty"`
+	RedResumeReady   bool     `json:"redResumeReady,omitempty"`
+	ResumeCountdown  int      `json:"resumeCountdown,omitempty"`
 }
 
 type PendingEditInfo struct {
@@ -247,4 +253,20 @@ type EditAppliedPayload struct {
 type EditRejectedPayload struct {
 	RejectedBy   string `json:"rejectedBy"`
 	RejectedSide string `json:"rejectedSide"`
+}
+
+// Resume ready payloads
+
+type ReadyToResumePayload struct {
+	Ready bool `json:"ready"`
+}
+
+type ResumeReadyUpdatePayload struct {
+	BlueReady bool `json:"blueReady"`
+	RedReady  bool `json:"redReady"`
+}
+
+type ResumeCountdownPayload struct {
+	SecondsRemaining int    `json:"secondsRemaining"`
+	CancelledBy      string `json:"cancelledBy,omitempty"`
 }

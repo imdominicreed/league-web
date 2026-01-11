@@ -41,6 +41,10 @@ interface DraftSliceState {
   isPaused: boolean
   pausedBy: string | null
   pausedBySide: 'blue' | 'red' | null
+  // Resume ready state
+  blueResumeReady: boolean
+  redResumeReady: boolean
+  resumeCountdown: number
   // Edit state
   editingSlot: EditingSlot | null
   pendingEdit: PendingEdit | null
@@ -69,6 +73,10 @@ const initialState: DraftSliceState = {
   isPaused: false,
   pausedBy: null,
   pausedBySide: null,
+  // Resume ready state
+  blueResumeReady: false,
+  redResumeReady: false,
+  resumeCountdown: 0,
   // Edit state
   editingSlot: null,
   pendingEdit: null,
@@ -96,6 +104,9 @@ const draftSlice = createSlice({
       pausedBy?: string | null
       pausedBySide?: string | null
       pendingEdit?: PendingEdit | null
+      blueResumeReady?: boolean
+      redResumeReady?: boolean
+      resumeCountdown?: number
     }>) => {
       state.currentPhase = action.payload.currentPhase
       state.currentTeam = action.payload.currentTeam
@@ -114,6 +125,9 @@ const draftSlice = createSlice({
       state.pausedBy = action.payload.pausedBy || null
       state.pausedBySide = (action.payload.pausedBySide as 'blue' | 'red') || null
       state.pendingEdit = action.payload.pendingEdit || null
+      state.blueResumeReady = action.payload.blueResumeReady || false
+      state.redResumeReady = action.payload.redResumeReady || false
+      state.resumeCountdown = action.payload.resumeCountdown || 0
     },
     championSelected: (state, action: PayloadAction<{ phase: number; team: string; actionType: string; championId: string }>) => {
       const { team, actionType, championId } = action.payload
@@ -181,6 +195,9 @@ const draftSlice = createSlice({
       state.timerRemainingMs = action.payload.timerRemainingMs
       state.editingSlot = null
       state.pendingEdit = null
+      state.blueResumeReady = false
+      state.redResumeReady = false
+      state.resumeCountdown = 0
     },
 
     // Edit reducers
@@ -217,6 +234,27 @@ const draftSlice = createSlice({
     editRejected: (state) => {
       state.pendingEdit = null
     },
+
+    // Resume ready reducers
+    resumeReadyUpdate: (state, action: PayloadAction<{
+      blueReady: boolean
+      redReady: boolean
+    }>) => {
+      state.blueResumeReady = action.payload.blueReady
+      state.redResumeReady = action.payload.redReady
+    },
+
+    resumeCountdownUpdate: (state, action: PayloadAction<{
+      secondsRemaining: number
+      cancelledBy?: string
+    }>) => {
+      state.resumeCountdown = action.payload.secondsRemaining
+      // If cancelled, reset ready states
+      if (action.payload.cancelledBy || action.payload.secondsRemaining === 0) {
+        state.blueResumeReady = false
+        state.redResumeReady = false
+      }
+    },
   },
 })
 
@@ -235,6 +273,8 @@ export const {
   editProposed,
   editApplied,
   editRejected,
+  resumeReadyUpdate,
+  resumeCountdownUpdate,
 } = draftSlice.actions
 
 export default draftSlice.reducer

@@ -50,6 +50,10 @@ export interface DraftState {
   pausedBy?: string
   pausedBySide?: 'blue' | 'red'
   pendingEdit?: PendingEditInfo
+  // Resume ready state
+  blueResumeReady?: boolean
+  redResumeReady?: boolean
+  resumeCountdown?: number
 }
 
 export interface Player {

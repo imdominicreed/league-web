@@ -20,6 +20,7 @@ interface Props {
     proposeEdit: (slotType: 'ban' | 'pick', team: 'blue' | 'red', slotIndex: number, championId: string) => void
     confirmEdit: () => void
     rejectEdit: () => void
+    readyToResume: (ready: boolean) => void
   }
 }
 
@@ -54,7 +55,7 @@ export default function DraftBoard({ ws }: Props) {
               <DraftTimer />
               <PauseControls
                 onPause={ws.pauseDraft}
-                onResume={ws.resumeDraft}
+                onReadyToResume={ws.readyToResume}
               />
             </>
           )}

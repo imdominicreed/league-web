@@ -201,6 +201,19 @@ func (c *Client) handleMessage(msg *Message) {
 		if c.room != nil {
 			c.room.rejectEdit <- c
 		}
+
+	case MessageTypeReadyToResume:
+		var payload ReadyToResumePayload
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+			c.sendError("INVALID_PAYLOAD", "Invalid ready to resume payload")
+			return
+		}
+		if c.room != nil {
+			c.room.readyToResume <- &ReadyToResumeRequest{
+				Client: c,
+				Ready:  payload.Ready,
+			}
+		}
 	}
 }
 
