@@ -31,6 +31,14 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
   console.log(`   Response: ${response.status} ${response.statusText}`)
 
   if (!response.ok) {
+    // Handle expired/invalid token - redirect to login
+    if (response.status === 401) {
+      localStorage.removeItem('accessToken')
+      localStorage.removeItem('refreshToken')
+      window.location.href = '/login'
+      throw new Error('Session expired')
+    }
+
     const error = await response.text()
     console.error(`❌ API Error: ${response.status} ${options.method || 'GET'} ${endpoint}`, error)
     throw new Error(error || 'Request failed')
