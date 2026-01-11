@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from 'react'
+import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import { RootState } from '@/store'
 import {
@@ -18,6 +18,8 @@ import {
 } from '@/store/slices/draftSlice'
 import { syncRoom, playerUpdate, updateRoomStatus, setConnectionStatus, setError } from '@/store/slices/roomSlice'
 import { WSMessage, StateSyncPayload } from '@/types'
+import { MessageRouter } from '@/utils/MessageRouter'
+import type { CommandAction } from '@/types/websocket'
 
 const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/v1/ws`
 
@@ -27,6 +29,108 @@ export function useWebSocket(roomId: string, side: string) {
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [isConnected, setIsConnected] = useState(false)
+
+  // Create message router with handlers for server responses (still old format)
+  const router = useMemo(() => {
+    return new MessageRouter().registerOldHandlers({
+      STATE_SYNC: (payload) => {
+        const p = payload as StateSyncPayload
+        dispatch(syncState({
+          ...p.draft,
+          yourSide: p.yourSide,
+          fearlessBans: p.fearlessBans,
+          teamPlayers: p.teamPlayers,
+          isTeamDraft: p.isTeamDraft,
+          isPaused: p.draft.isPaused ?? false,
+          pausedBy: p.draft.pausedBy ?? null,
+          pausedBySide: p.draft.pausedBySide ?? null,
+          pendingEdit: p.draft.pendingEdit ?? null,
+          blueResumeReady: p.draft.blueResumeReady ?? false,
+          redResumeReady: p.draft.redResumeReady ?? false,
+          resumeCountdown: p.draft.resumeCountdown ?? 0,
+        }))
+        dispatch(syncRoom({
+          room: {
+            id: p.room.id,
+            shortCode: p.room.shortCode,
+            draftMode: p.room.draftMode as 'pro_play' | 'fearless',
+            timerDurationSeconds: p.room.timerDuration / 1000,
+            status: p.room.status as 'waiting' | 'in_progress' | 'completed',
+          },
+          players: p.players,
+          spectatorCount: p.spectatorCount,
+          isCaptain: p.isCaptain,
+          isTeamDraft: p.isTeamDraft,
+        }))
+      },
+      PLAYER_UPDATE: (payload) => {
+        dispatch(playerUpdate(payload as { side: string; player: { userId: string; displayName: string; ready: boolean } | null; action: string }))
+      },
+      DRAFT_STARTED: (payload) => {
+        dispatch(updateRoomStatus('in_progress'))
+        dispatch(phaseChanged(payload as { currentPhase: number; currentTeam: string; actionType: string; timerRemainingMs: number }))
+      },
+      PHASE_CHANGED: (payload) => {
+        dispatch(phaseChanged(payload as { currentPhase: number; currentTeam: string; actionType: string; timerRemainingMs: number }))
+      },
+      CHAMPION_SELECTED: (payload) => {
+        dispatch(championSelected(payload as { phase: number; team: string; actionType: string; championId: string }))
+      },
+      CHAMPION_HOVERED: (payload) => {
+        dispatch(championHovered(payload as { side: string; championId: string | null }))
+      },
+      TIMER_TICK: (payload) => {
+        dispatch(updateTimer(payload as { remainingMs: number }))
+      },
+      DRAFT_COMPLETED: (payload) => {
+        dispatch(updateRoomStatus('completed'))
+        dispatch(draftCompleted(payload as { blueBans: string[]; redBans: string[]; bluePicks: string[]; redPicks: string[] }))
+      },
+      ERROR: (payload) => {
+        const p = payload as { message: string }
+        console.error('Server error:', p.message)
+        dispatch(setError(p.message))
+      },
+      DRAFT_PAUSED: (payload) => {
+        dispatch(draftPaused(payload as { pausedBy: string; pausedBySide: 'blue' | 'red'; timerFrozenAt: number }))
+      },
+      DRAFT_RESUMED: (payload) => {
+        dispatch(draftResumed(payload as { timerRemainingMs: number }))
+      },
+      EDIT_PROPOSED: (payload) => {
+        dispatch(editProposed(payload as {
+          proposedBy: string; proposedSide: 'blue' | 'red'; slotType: 'ban' | 'pick'
+          team: 'blue' | 'red'; slotIndex: number; oldChampionId: string; newChampionId: string; expiresAt: number
+        }))
+      },
+      EDIT_APPLIED: (payload) => {
+        dispatch(editApplied(payload as {
+          slotType: 'ban' | 'pick'; team: 'blue' | 'red'; slotIndex: number; newChampionId: string
+          blueBans: string[]; redBans: string[]; bluePicks: string[]; redPicks: string[]
+        }))
+      },
+      EDIT_REJECTED: () => {
+        dispatch(editRejected())
+      },
+      RESUME_READY_UPDATE: (payload) => {
+        dispatch(resumeReadyUpdate(payload as { blueReady: boolean; redReady: boolean }))
+      },
+      RESUME_COUNTDOWN: (payload) => {
+        dispatch(resumeCountdownUpdate(payload as { secondsRemaining: number; cancelledBy?: string }))
+      },
+    })
+  }, [dispatch])
+
+  // Send a v2 COMMAND message
+  const sendCommand = useCallback((action: CommandAction, payload?: unknown) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'COMMAND',
+        payload: { action, ...(payload ? { payload } : {}) },
+        timestamp: Date.now(),
+      }))
+    }
+  }, [])
 
   const connect = useCallback(() => {
     if (!accessToken || !roomId || !side) return
@@ -40,17 +144,13 @@ export function useWebSocket(roomId: string, side: string) {
       setIsConnected(true)
       dispatch(setConnectionStatus('connected'))
 
-      // Join room with assigned side
-      ws.send(JSON.stringify({
-        type: 'JOIN_ROOM',
-        payload: { roomId, side },
-        timestamp: Date.now(),
-      }))
+      // Join room with v2 COMMAND
+      sendCommand('join_room', { roomId, side })
     }
 
     ws.onmessage = (event) => {
       const message: WSMessage = JSON.parse(event.data)
-      handleMessage(message)
+      router.handle(message)
     }
 
     ws.onclose = () => {
@@ -67,189 +167,52 @@ export function useWebSocket(roomId: string, side: string) {
       console.error('WebSocket connection error:', event)
       dispatch(setError('WebSocket connection error'))
     }
-  }, [accessToken, roomId, side, dispatch])
+  }, [accessToken, roomId, side, dispatch, router, sendCommand])
 
-  const handleMessage = (message: WSMessage) => {
-    switch (message.type) {
-      case 'STATE_SYNC': {
-        const payload = message.payload as StateSyncPayload
-        console.log('STATE_SYNC received:', {
-          yourSide: payload.yourSide,
-          isCaptain: payload.isCaptain,
-          isTeamDraft: payload.isTeamDraft,
-          players: payload.players,
-          teamPlayers: payload.teamPlayers,
-        })
-        dispatch(syncState({
-          ...payload.draft,
-          yourSide: payload.yourSide,
-          fearlessBans: payload.fearlessBans,
-          teamPlayers: payload.teamPlayers,
-          isTeamDraft: payload.isTeamDraft,
-          isPaused: payload.draft.isPaused ?? false,
-          pausedBy: payload.draft.pausedBy ?? null,
-          pausedBySide: payload.draft.pausedBySide ?? null,
-          pendingEdit: payload.draft.pendingEdit ?? null,
-          blueResumeReady: payload.draft.blueResumeReady ?? false,
-          redResumeReady: payload.draft.redResumeReady ?? false,
-          resumeCountdown: payload.draft.resumeCountdown ?? 0,
-        }))
-        dispatch(syncRoom({
-          room: {
-            id: payload.room.id,
-            shortCode: payload.room.shortCode,
-            draftMode: payload.room.draftMode as 'pro_play' | 'fearless',
-            timerDurationSeconds: payload.room.timerDuration / 1000,
-            status: payload.room.status as 'waiting' | 'in_progress' | 'completed',
-          },
-          players: payload.players,
-          spectatorCount: payload.spectatorCount,
-          isCaptain: payload.isCaptain,
-          isTeamDraft: payload.isTeamDraft,
-        }))
-        break
-      }
-      case 'PLAYER_UPDATE':
-        dispatch(playerUpdate(message.payload as { side: string; player: { userId: string; displayName: string; ready: boolean } | null; action: string }))
-        break
-      case 'DRAFT_STARTED':
-        dispatch(updateRoomStatus('in_progress'))
-        dispatch(phaseChanged(message.payload as { currentPhase: number; currentTeam: string; actionType: string; timerRemainingMs: number }))
-        break
-      case 'PHASE_CHANGED':
-        dispatch(phaseChanged(message.payload as { currentPhase: number; currentTeam: string; actionType: string; timerRemainingMs: number }))
-        break
-      case 'CHAMPION_SELECTED':
-        dispatch(championSelected(message.payload as { phase: number; team: string; actionType: string; championId: string }))
-        break
-      case 'CHAMPION_HOVERED':
-        dispatch(championHovered(message.payload as { side: string; championId: string | null }))
-        break
-      case 'TIMER_TICK':
-        dispatch(updateTimer(message.payload as { remainingMs: number }))
-        break
-      case 'DRAFT_COMPLETED':
-        dispatch(updateRoomStatus('completed'))
-        dispatch(draftCompleted(message.payload as { blueBans: string[]; redBans: string[]; bluePicks: string[]; redPicks: string[] }))
-        break
-      case 'ERROR':
-        console.error('Server error message:', (message.payload as { message: string }).message)
-        dispatch(setError((message.payload as { message: string }).message))
-        break
-
-      case 'DRAFT_PAUSED':
-        dispatch(draftPaused(message.payload as {
-          pausedBy: string
-          pausedBySide: 'blue' | 'red'
-          timerFrozenAt: number
-        }))
-        break
-
-      case 'DRAFT_RESUMED':
-        dispatch(draftResumed(message.payload as {
-          timerRemainingMs: number
-        }))
-        break
-
-      case 'EDIT_PROPOSED':
-        dispatch(editProposed(message.payload as {
-          proposedBy: string
-          proposedSide: 'blue' | 'red'
-          slotType: 'ban' | 'pick'
-          team: 'blue' | 'red'
-          slotIndex: number
-          oldChampionId: string
-          newChampionId: string
-          expiresAt: number
-        }))
-        break
-
-      case 'EDIT_APPLIED':
-        dispatch(editApplied(message.payload as {
-          slotType: 'ban' | 'pick'
-          team: 'blue' | 'red'
-          slotIndex: number
-          newChampionId: string
-          blueBans: string[]
-          redBans: string[]
-          bluePicks: string[]
-          redPicks: string[]
-        }))
-        break
-
-      case 'EDIT_REJECTED':
-        dispatch(editRejected())
-        break
-
-      case 'RESUME_READY_UPDATE':
-        dispatch(resumeReadyUpdate(message.payload as {
-          blueReady: boolean
-          redReady: boolean
-        }))
-        break
-
-      case 'RESUME_COUNTDOWN':
-        dispatch(resumeCountdownUpdate(message.payload as {
-          secondsRemaining: number
-          cancelledBy?: string
-        }))
-        break
-    }
-  }
-
-  const send = useCallback((type: string, payload: unknown) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type,
-        payload,
-        timestamp: Date.now(),
-      }))
-    }
-  }, [])
-
+  // Action handlers using v2 COMMAND format
   const selectChampion = useCallback((championId: string) => {
-    send('SELECT_CHAMPION', { championId })
-  }, [send])
+    sendCommand('select_champion', { championId })
+  }, [sendCommand])
 
   const lockIn = useCallback(() => {
-    send('LOCK_IN', {})
-  }, [send])
+    sendCommand('lock_in')
+  }, [sendCommand])
 
   const hoverChampion = useCallback((championId: string | null) => {
-    send('HOVER_CHAMPION', { championId })
-  }, [send])
+    sendCommand('hover_champion', { championId })
+  }, [sendCommand])
 
   const setReady = useCallback((ready: boolean) => {
-    send('READY', { ready })
-  }, [send])
+    sendCommand('set_ready', { ready })
+  }, [sendCommand])
 
   const startDraft = useCallback(() => {
-    send('START_DRAFT', {})
-  }, [send])
+    sendCommand('start_draft')
+  }, [sendCommand])
 
   const pauseDraft = useCallback(() => {
-    send('PAUSE_DRAFT', {})
-  }, [send])
+    sendCommand('pause_draft')
+  }, [sendCommand])
 
   const resumeDraft = useCallback(() => {
-    send('RESUME_DRAFT', {})
-  }, [send])
+    sendCommand('resume_ready', { ready: true })
+  }, [sendCommand])
 
   const proposeEdit = useCallback((slotType: 'ban' | 'pick', team: 'blue' | 'red', slotIndex: number, championId: string) => {
-    send('PROPOSE_EDIT', { slotType, team, slotIndex, championId })
-  }, [send])
+    sendCommand('propose_edit', { slotType, team, slotIndex, championId })
+  }, [sendCommand])
 
   const confirmEdit = useCallback(() => {
-    send('CONFIRM_EDIT', {})
-  }, [send])
+    sendCommand('respond_edit', { accept: true })
+  }, [sendCommand])
 
   const rejectEdit = useCallback(() => {
-    send('REJECT_EDIT', {})
-  }, [send])
+    sendCommand('respond_edit', { accept: false })
+  }, [sendCommand])
 
   const readyToResume = useCallback((ready: boolean) => {
-    send('READY_TO_RESUME', { ready })
-  }, [send])
+    sendCommand('resume_ready', { ready })
+  }, [sendCommand])
 
   useEffect(() => {
     connect()
@@ -275,6 +238,5 @@ export function useWebSocket(roomId: string, side: string) {
     confirmEdit,
     rejectEdit,
     readyToResume,
-    send,
   }
 }

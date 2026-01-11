@@ -101,13 +101,32 @@ func (c *WSClient) Close() {
 	}
 }
 
-// sendMessage sends a message to the server
-func (c *WSClient) sendMessage(msgType websocket.MessageType, payload interface{}) {
+// sendCommand sends a v2 COMMAND message to the server
+func (c *WSClient) sendCommand(action websocket.CommandAction, payload interface{}) {
 	c.t.Helper()
 
-	msg, err := websocket.NewMessage(msgType, payload)
+	cmd := websocket.Command{
+		Action:  action,
+		Payload: nil,
+	}
+
+	if payload != nil {
+		payloadBytes, err := json.Marshal(payload)
+		if err != nil {
+			c.t.Fatalf("failed to marshal command payload: %v", err)
+		}
+		cmd.Payload = payloadBytes
+	}
+
+	cmdBytes, err := json.Marshal(cmd)
 	if err != nil {
-		c.t.Fatalf("failed to create message: %v", err)
+		c.t.Fatalf("failed to marshal command: %v", err)
+	}
+
+	msg := &websocket.Msg{
+		Type:      websocket.MsgTypeCommand,
+		Payload:   cmdBytes,
+		Timestamp: time.Now().UnixMilli(),
 	}
 
 	data, err := json.Marshal(msg)
@@ -120,52 +139,85 @@ func (c *WSClient) sendMessage(msgType websocket.MessageType, payload interface{
 	c.mu.Unlock()
 
 	if err != nil {
-		c.t.Fatalf("failed to send message: %v", err)
+		c.t.Fatalf("failed to send command: %v", err)
 	}
 }
 
-// JoinRoom sends a JOIN_ROOM message
+// JoinRoom sends a v2 join_room COMMAND
 func (c *WSClient) JoinRoom(roomID, side string) {
-	c.sendMessage(websocket.MessageTypeJoinRoom, websocket.JoinRoomPayload{
+	c.sendCommand(websocket.CmdJoinRoom, websocket.CmdJoinRoomPayload{
 		RoomID: roomID,
 		Side:   side,
 	})
 }
 
-// Ready sends a READY message
+// Ready sends a v2 set_ready COMMAND
 func (c *WSClient) Ready(ready bool) {
-	c.sendMessage(websocket.MessageTypeReady, websocket.ReadyPayload{
+	c.sendCommand(websocket.CmdSetReady, websocket.CmdSetReadyPayload{
 		Ready: ready,
 	})
 }
 
-// StartDraft sends a START_DRAFT message
+// StartDraft sends a v2 start_draft COMMAND
 func (c *WSClient) StartDraft() {
-	c.sendMessage(websocket.MessageTypeStartDraft, nil)
+	c.sendCommand(websocket.CmdStartDraft, nil)
 }
 
-// SelectChampion sends a SELECT_CHAMPION message
+// SelectChampion sends a v2 select_champion COMMAND
 func (c *WSClient) SelectChampion(championID string) {
-	c.sendMessage(websocket.MessageTypeSelectChampion, websocket.SelectChampionPayload{
+	c.sendCommand(websocket.CmdSelectChampion, websocket.CmdSelectChampionPayload{
 		ChampionID: championID,
 	})
 }
 
-// LockIn sends a LOCK_IN message
+// LockIn sends a v2 lock_in COMMAND
 func (c *WSClient) LockIn() {
-	c.sendMessage(websocket.MessageTypeLockIn, nil)
+	c.sendCommand(websocket.CmdLockIn, nil)
 }
 
-// HoverChampion sends a HOVER_CHAMPION message
+// HoverChampion sends a v2 hover_champion COMMAND
 func (c *WSClient) HoverChampion(championID *string) {
-	c.sendMessage(websocket.MessageTypeHoverChampion, websocket.HoverChampionPayload{
+	c.sendCommand(websocket.CmdHoverChampion, websocket.CmdHoverChampionPayload{
 		ChampionID: championID,
 	})
 }
 
-// SyncState sends a SYNC_STATE message
+// SyncState sends a v2 sync_state QUERY
 func (c *WSClient) SyncState() {
-	c.sendMessage(websocket.MessageTypeSyncState, nil)
+	c.sendQuery(websocket.QuerySyncState)
+}
+
+// sendQuery sends a v2 QUERY message to the server
+func (c *WSClient) sendQuery(queryType websocket.QueryType) {
+	c.t.Helper()
+
+	query := websocket.Query{
+		Query: queryType,
+	}
+
+	queryBytes, err := json.Marshal(query)
+	if err != nil {
+		c.t.Fatalf("failed to marshal query: %v", err)
+	}
+
+	msg := &websocket.Msg{
+		Type:      websocket.MsgTypeQuery,
+		Payload:   queryBytes,
+		Timestamp: time.Now().UnixMilli(),
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		c.t.Fatalf("failed to marshal message: %v", err)
+	}
+
+	c.mu.Lock()
+	err = c.conn.WriteMessage(gorillaWS.TextMessage, data)
+	c.mu.Unlock()
+
+	if err != nil {
+		c.t.Fatalf("failed to send query: %v", err)
+	}
 }
 
 // ExpectMessage waits for a message of the specified type

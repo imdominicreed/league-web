@@ -102,118 +102,32 @@ func (c *Client) WritePump() {
 }
 
 func (c *Client) handleMessage(msg *Message) {
-	switch msg.Type {
-	case MessageTypeJoinRoom:
-		var payload JoinRoomPayload
-		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-			c.sendError("INVALID_PAYLOAD", "Invalid join room payload")
-			return
-		}
-		c.hub.joinRoom <- &JoinRoomRequest{
-			Client: c,
-			RoomID: payload.RoomID,
-			Side:   payload.Side,
-		}
+	// Route to v2 command handler
+	handler := NewCommandHandler(c)
+	msgTypeStr := string(msg.Type)
 
-	case MessageTypeSelectChampion:
-		var payload SelectChampionPayload
-		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-			c.sendError("INVALID_PAYLOAD", "Invalid select champion payload")
-			return
+	switch msgTypeStr {
+	case string(MsgTypeCommand):
+		v2Msg := &Msg{
+			Type:      MsgTypeCommand,
+			Payload:   msg.Payload,
+			Timestamp: msg.Timestamp,
+			Seq:       msg.Seq,
 		}
-		if c.room != nil {
-			c.room.selectChampion <- &SelectChampionRequest{
-				Client:     c,
-				ChampionID: payload.ChampionID,
-			}
-		}
+		handler.HandleCommand(v2Msg)
 
-	case MessageTypeLockIn:
-		if c.room != nil {
-			c.room.lockIn <- c
+	case string(MsgTypeQuery):
+		v2Msg := &Msg{
+			Type:      MsgTypeQuery,
+			Payload:   msg.Payload,
+			Timestamp: msg.Timestamp,
+			Seq:       msg.Seq,
 		}
+		handler.HandleQuery(v2Msg)
 
-	case MessageTypeHoverChampion:
-		var payload HoverChampionPayload
-		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-			c.sendError("INVALID_PAYLOAD", "Invalid hover champion payload")
-			return
-		}
-		if c.room != nil {
-			c.room.hoverChampion <- &HoverChampionRequest{
-				Client:     c,
-				ChampionID: payload.ChampionID,
-			}
-		}
-
-	case MessageTypeReady:
-		var payload ReadyPayload
-		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-			c.sendError("INVALID_PAYLOAD", "Invalid ready payload")
-			return
-		}
-		if c.room != nil {
-			c.room.ready <- &ReadyRequest{
-				Client: c,
-				Ready:  payload.Ready,
-			}
-		}
-
-	case MessageTypeStartDraft:
-		if c.room != nil {
-			c.room.startDraft <- c
-		}
-
-	case MessageTypeSyncState:
-		if c.room != nil {
-			c.room.syncState <- c
-		}
-
-	case MessageTypePauseDraft:
-		if c.room != nil {
-			c.room.pauseDraft <- c
-		}
-
-	case MessageTypeResumeDraft:
-		if c.room != nil {
-			c.room.resumeDraft <- c
-		}
-
-	case MessageTypeProposeEdit:
-		var payload ProposeEditPayload
-		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-			c.sendError("INVALID_PAYLOAD", "Invalid propose edit payload")
-			return
-		}
-		if c.room != nil {
-			c.room.proposeEdit <- &ProposeEditRequest{
-				Client:  c,
-				Payload: payload,
-			}
-		}
-
-	case MessageTypeConfirmEdit:
-		if c.room != nil {
-			c.room.confirmEdit <- c
-		}
-
-	case MessageTypeRejectEdit:
-		if c.room != nil {
-			c.room.rejectEdit <- c
-		}
-
-	case MessageTypeReadyToResume:
-		var payload ReadyToResumePayload
-		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-			c.sendError("INVALID_PAYLOAD", "Invalid ready to resume payload")
-			return
-		}
-		if c.room != nil {
-			c.room.readyToResume <- &ReadyToResumeRequest{
-				Client: c,
-				Ready:  payload.Ready,
-			}
-		}
+	default:
+		log.Printf("Unknown message type: %s", msg.Type)
+		c.sendError("UNKNOWN_MESSAGE", "Unknown message type")
 	}
 }
 
@@ -234,3 +148,4 @@ func (c *Client) Send(msg *Message) {
 	}
 	c.send <- data
 }
+

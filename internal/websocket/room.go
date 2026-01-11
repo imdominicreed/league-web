@@ -80,35 +80,14 @@ type Room struct {
 	mu sync.RWMutex
 }
 
-// PendingEdit represents an edit proposal awaiting confirmation
-type PendingEdit struct {
-	ProposedBy    uuid.UUID
-	ProposedSide  string
-	SlotType      string // "ban" or "pick"
-	Team          string // "blue" or "red"
-	SlotIndex     int
-	OldChampionID string
-	NewChampionID string
-	ExpiresAt     time.Time
-}
-
 // ProposeEditRequest contains the client and payload for an edit proposal
 type ProposeEditRequest struct {
 	Client  *Client
 	Payload ProposeEditPayload
 }
 
-type DraftState struct {
-	CurrentPhase int
-	BlueBans     []string
-	RedBans      []string
-	BluePicks    []string
-	RedPicks     []string
-	IsComplete   bool
-	BlueReady    bool
-	RedReady     bool
-	Started      bool
-}
+// Note: PendingEdit is defined in edit_manager.go
+// Note: DraftState is defined in draft_state.go
 
 type SelectChampionRequest struct {
 	Client     *Client
