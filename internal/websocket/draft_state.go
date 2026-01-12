@@ -24,24 +24,15 @@ type DraftState struct {
 
 // DraftStateManager handles draft phase transitions and champion selections.
 type DraftStateManager struct {
-	state        *DraftState
-	currentHover map[string]*string // side -> championId
-	championRepo repository.ChampionRepository
-	emitter      *EventEmitter
-	timerMgr     *TimerManager
+	state         *DraftState
+	currentHover  map[string]*string // side -> championId
+	championRepo  repository.ChampionRepository
 	timerDuration int
-
-	// Callbacks
-	onDraftComplete func()
-	sendStateSync   func() // Called to sync state after draft start/complete
+	room          *Room
 }
 
 // NewDraftStateManager creates a new draft state manager.
-func NewDraftStateManager(
-	championRepo repository.ChampionRepository,
-	emitter *EventEmitter,
-	timerDuration int,
-) *DraftStateManager {
+func NewDraftStateManager(room *Room, championRepo repository.ChampionRepository, timerDuration int) *DraftStateManager {
 	return &DraftStateManager{
 		state: &DraftState{
 			CurrentPhase: 0,
@@ -52,20 +43,9 @@ func NewDraftStateManager(
 		},
 		currentHover:  make(map[string]*string),
 		championRepo:  championRepo,
-		emitter:       emitter,
 		timerDuration: timerDuration,
+		room:          room,
 	}
-}
-
-// SetTimerManager sets the timer manager (for circular dependency resolution).
-func (dm *DraftStateManager) SetTimerManager(tm *TimerManager) {
-	dm.timerMgr = tm
-}
-
-// SetCallbacks sets the callbacks for draft events.
-func (dm *DraftStateManager) SetCallbacks(onComplete func(), sendStateSync func()) {
-	dm.onDraftComplete = onComplete
-	dm.sendStateSync = sendStateSync
 }
 
 // GetState returns the current draft state.
@@ -112,6 +92,21 @@ func (dm *DraftStateManager) BothReady() bool {
 	return dm.state.BlueReady && dm.state.RedReady
 }
 
+// GetCurrentHover returns the hover for the specified side.
+func (dm *DraftStateManager) GetCurrentHover(side string) *string {
+	return dm.currentHover[side]
+}
+
+// SetCurrentHover sets the hover for the specified side.
+func (dm *DraftStateManager) SetCurrentHover(side string, championID *string) {
+	dm.currentHover[side] = championID
+}
+
+// ClearHover clears all hover state.
+func (dm *DraftStateManager) ClearHover() {
+	dm.currentHover = make(map[string]*string)
+}
+
 // Start starts the draft.
 func (dm *DraftStateManager) Start() {
 	dm.state.Started = true
@@ -119,22 +114,18 @@ func (dm *DraftStateManager) Start() {
 	phase := domain.GetPhase(0)
 
 	// Broadcast draft started
-	dm.emitter.DraftStarted(
+	dm.room.emitter.DraftStarted(
 		"0",
 		string(phase.Team),
 		string(phase.ActionType),
 		dm.timerDuration,
 	)
 
-	// Send state sync to update room status
-	if dm.sendStateSync != nil {
-		dm.sendStateSync()
-	}
+	// Send state sync to all clients
+	dm.room.syncAllClients()
 
 	// Start the timer
-	if dm.timerMgr != nil {
-		dm.timerMgr.Start()
-	}
+	dm.room.timerMgr.Start()
 }
 
 // SelectChampion handles champion selection (hover before lock).
@@ -154,7 +145,7 @@ func (dm *DraftStateManager) SelectChampion(side string, championID string) erro
 	}
 
 	// Check if champion is already picked/banned
-	if dm.isChampionUsed(championID) {
+	if dm.IsChampionUsed(championID) {
 		return &DraftError{"champion_unavailable", "Champion is already picked or banned"}
 	}
 
@@ -162,7 +153,7 @@ func (dm *DraftStateManager) SelectChampion(side string, championID string) erro
 	dm.currentHover[currentSide] = &championID
 
 	// Broadcast hover
-	dm.emitter.ChampionHovered(currentSide, &championID)
+	dm.room.emitter.ChampionHovered(currentSide, &championID)
 
 	return nil
 }
@@ -193,12 +184,10 @@ func (dm *DraftStateManager) LockIn(side string) error {
 	dm.applySelection(phase, *championID)
 
 	// Stop current timer
-	if dm.timerMgr != nil {
-		dm.timerMgr.Stop()
-	}
+	dm.room.timerMgr.Stop()
 
 	// Broadcast selection
-	dm.emitter.ChampionSelected(
+	dm.room.emitter.ChampionSelected(
 		dm.state.CurrentPhase,
 		string(phase.Team),
 		string(phase.ActionType),
@@ -216,7 +205,7 @@ func (dm *DraftStateManager) HoverChampion(side string, championID *string) {
 	if !dm.state.Started {
 		return
 	}
-	dm.emitter.ChampionHovered(side, championID)
+	dm.room.emitter.ChampionHovered(side, championID)
 }
 
 // HandleTimerExpired handles timer expiration (auto-pick/ban).
@@ -243,7 +232,7 @@ func (dm *DraftStateManager) HandleTimerExpired() {
 	dm.applySelection(phase, championID)
 
 	// Broadcast selection
-	dm.emitter.ChampionSelected(
+	dm.room.emitter.ChampionSelected(
 		dm.state.CurrentPhase,
 		string(phase.Team),
 		string(phase.ActionType),
@@ -263,28 +252,22 @@ func (dm *DraftStateManager) advancePhase() {
 	if dm.state.CurrentPhase >= domain.TotalPhases() {
 		dm.state.IsComplete = true
 
-		dm.emitter.DraftCompleted(
+		dm.room.emitter.DraftCompleted(
 			dm.state.BlueBans,
 			dm.state.RedBans,
 			dm.state.BluePicks,
 			dm.state.RedPicks,
 		)
 
-		// Send state sync to update room status
-		if dm.sendStateSync != nil {
-			dm.sendStateSync()
-		}
-
-		if dm.onDraftComplete != nil {
-			dm.onDraftComplete()
-		}
+		// Send state sync to all clients
+		dm.room.syncAllClients()
 
 		return
 	}
 
 	phase := domain.GetPhase(dm.state.CurrentPhase)
 
-	dm.emitter.PhaseChanged(
+	dm.room.emitter.PhaseChanged(
 		dm.state.CurrentPhase,
 		string(phase.Team),
 		string(phase.ActionType),
@@ -292,9 +275,7 @@ func (dm *DraftStateManager) advancePhase() {
 	)
 
 	// Start timer for next phase
-	if dm.timerMgr != nil {
-		dm.timerMgr.Start()
-	}
+	dm.room.timerMgr.Start()
 }
 
 // applySelection applies a selection to the draft state.
@@ -315,8 +296,8 @@ func (dm *DraftStateManager) applySelection(phase *domain.Phase, championID stri
 	}
 }
 
-// isChampionUsed checks if a champion is already picked or banned.
-func (dm *DraftStateManager) isChampionUsed(championID string) bool {
+// IsChampionUsed checks if a champion is already picked or banned.
+func (dm *DraftStateManager) IsChampionUsed(championID string) bool {
 	for _, id := range dm.state.BlueBans {
 		if id == championID {
 			return true
@@ -417,7 +398,7 @@ func (dm *DraftStateManager) getRandomAvailableChampion() string {
 	// Filter out used champions
 	var available []string
 	for _, c := range champions {
-		if !dm.isChampionUsed(c.ID) {
+		if !dm.IsChampionUsed(c.ID) {
 			available = append(available, c.ID)
 		}
 	}

@@ -2,19 +2,13 @@ package websocket
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"log"
-	"math/rand"
 	"sync"
-	"time"
 
 	"github.com/dom/league-draft-website/internal/domain"
 	"github.com/dom/league-draft-website/internal/repository"
 	"github.com/google/uuid"
 )
-
-const bufferDurationMs = 5000 // 5 second buffer after timer hits 0
 
 type Room struct {
 	id              uuid.UUID
@@ -35,30 +29,12 @@ type Room struct {
 	blueTeamClients  map[*Client]bool // Non-captain blue team members
 	redTeamClients   map[*Client]bool // Non-captain red team members
 
-	// Draft state
-	draftState     *DraftState
-	currentHover   map[string]*string // side -> championId
-	timer          *time.Timer
-	timerStartedAt time.Time
-
-	// Pause state
-	isPaused           bool
-	pausedBy           *uuid.UUID
-	pausedBySide       string
-	pausedAt           time.Time
-	pauseRemainingMs   int         // Timer value when paused
-	pauseTimer         *time.Timer // For auto-resume
-	maxPauseDurationMs int         // 5 minutes default
-
-	// Edit state
-	pendingEdit  *PendingEdit
-	editTimeout  *time.Timer
-
-	// Resume ready state (during pause)
-	blueResumeReady       bool
-	redResumeReady        bool
-	resumeCountdown       int
-	resumeCountdownCancel chan struct{}
+	// Managers
+	emitter  *EventEmitter
+	timerMgr *TimerManager
+	pauseMgr *PauseManager
+	editMgr  *EditManager
+	draftMgr *DraftStateManager
 
 	// Channels
 	join           chan *Client
@@ -110,7 +86,7 @@ type ReadyToResumeRequest struct {
 }
 
 func NewRoom(id uuid.UUID, shortCode string, timerDurationMs int, userRepo repository.UserRepository, championRepo repository.ChampionRepository) *Room {
-	return &Room{
+	r := &Room{
 		id:               id,
 		shortCode:        shortCode,
 		clients:          make(map[*Client]bool),
@@ -120,16 +96,7 @@ func NewRoom(id uuid.UUID, shortCode string, timerDurationMs int, userRepo repos
 		timerDurationMs:  timerDurationMs,
 		userRepo:         userRepo,
 		championRepo:     championRepo,
-		draftState: &DraftState{
-			CurrentPhase: 0,
-			BlueBans:     []string{},
-			RedBans:      []string{},
-			BluePicks:    []string{},
-			RedPicks:     []string{},
-		},
-		currentHover:       make(map[string]*string),
-		maxPauseDurationMs: 300000, // 5 minutes
-		join:               make(chan *Client),
+		join:             make(chan *Client),
 		leave:              make(chan *Client),
 		broadcast:          make(chan *Message),
 		selectChampion:     make(chan *SelectChampionRequest),
@@ -145,6 +112,17 @@ func NewRoom(id uuid.UUID, shortCode string, timerDurationMs int, userRepo repos
 		rejectEdit:         make(chan *Client),
 		readyToResume:      make(chan *ReadyToResumeRequest),
 	}
+
+	// Initialize managers
+	r.emitter = NewEventEmitter(r)
+	r.timerMgr = NewTimerManager(timerDurationMs, r.emitter, r.handleTimerExpired)
+	r.pauseMgr = NewPauseManager(r)
+	r.editMgr = NewEditManager(r)
+
+	// DraftStateManager
+	r.draftMgr = NewDraftStateManager(r, championRepo, timerDurationMs)
+
+	return r
 }
 
 // InitializeTeamDraft sets up the room for 5v5 team draft mode
@@ -215,6 +193,11 @@ func (r *Room) getUserDisplayName(userID uuid.UUID) string {
 	return user.DisplayName
 }
 
+// getDraftState returns the current draft state from the DraftStateManager.
+func (r *Room) getDraftState() *DraftState {
+	return r.draftMgr.GetState()
+}
+
 func (r *Room) Run() {
 	for {
 		select {
@@ -225,7 +208,9 @@ func (r *Room) Run() {
 			r.handleLeave(client)
 
 		case msg := <-r.broadcast:
-			r.broadcastMessage(msg)
+			r.mu.RLock()
+			r.emitter.Broadcast(msg)
+			r.mu.RUnlock()
 
 		case req := <-r.selectChampion:
 			r.handleSelectChampion(req)
@@ -334,7 +319,7 @@ func (r *Room) handleJoin(client *Client) {
 	r.sendStateSyncLocked(client)
 
 	// Notify others
-	r.broadcastPlayerUpdate(client.side, &PlayerInfo{
+	r.emitter.PlayerUpdate(client.side, &PlayerInfo{
 		UserID:      client.userID.String(),
 		DisplayName: r.getUserDisplayName(client.userID),
 		Ready:       client.ready,
@@ -352,26 +337,26 @@ func (r *Room) handleLeave(client *Client) {
 
 	if r.blueClient == client {
 		r.blueClient = nil
-		r.draftState.BlueReady = false
+		r.getDraftState().BlueReady = false
 	}
 	if r.redClient == client {
 		r.redClient = nil
-		r.draftState.RedReady = false
+		r.getDraftState().RedReady = false
 	}
 
-	r.broadcastPlayerUpdate(client.side, nil, "left")
+	r.emitter.PlayerUpdate(client.side, nil, "left")
 }
 
 func (r *Room) handleSelectChampion(req *SelectChampionRequest) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if !r.draftState.Started || r.draftState.IsComplete {
+	if !r.getDraftState().Started || r.getDraftState().IsComplete {
 		req.Client.sendError("INVALID_STATE", "Draft not in progress")
 		return
 	}
 
-	phase := domain.GetPhase(r.draftState.CurrentPhase)
+	phase := domain.GetPhase(r.getDraftState().CurrentPhase)
 	if phase == nil {
 		return
 	}
@@ -395,32 +380,32 @@ func (r *Room) handleSelectChampion(req *SelectChampionRequest) {
 	}
 
 	// Check if champion is already picked/banned
-	if r.isChampionUsed(req.ChampionID) {
+	if r.draftMgr.IsChampionUsed(req.ChampionID) {
 		req.Client.sendError("CHAMPION_UNAVAILABLE", "Champion is already picked or banned")
 		return
 	}
 
 	// Store selection (will be confirmed on lock in)
-	r.currentHover[currentSide] = &req.ChampionID
+	r.draftMgr.SetCurrentHover(currentSide, &req.ChampionID)
 
 	// Broadcast hover
 	msg, _ := NewMessage(MessageTypeChampionHovered, ChampionHoveredPayload{
 		Side:       currentSide,
 		ChampionID: &req.ChampionID,
 	})
-	r.broadcastMessageLocked(msg)
+	r.emitter.Broadcast(msg)
 }
 
 func (r *Room) handleLockIn(client *Client) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if !r.draftState.Started || r.draftState.IsComplete {
+	if !r.getDraftState().Started || r.getDraftState().IsComplete {
 		client.sendError("INVALID_STATE", "Draft not in progress")
 		return
 	}
 
-	phase := domain.GetPhase(r.draftState.CurrentPhase)
+	phase := domain.GetPhase(r.getDraftState().CurrentPhase)
 	if phase == nil {
 		return
 	}
@@ -443,7 +428,7 @@ func (r *Room) handleLockIn(client *Client) {
 		}
 	}
 
-	championID := r.currentHover[currentSide]
+	championID := r.draftMgr.GetCurrentHover(currentSide)
 	if championID == nil {
 		none := "None"
 		championID = &none
@@ -451,31 +436,29 @@ func (r *Room) handleLockIn(client *Client) {
 	}
 
 	// Apply the selection
-	r.applySelection(phase, *championID)
+	r.draftMgr.applySelection(phase, *championID)
 
 	// Stop current timer
-	if r.timer != nil {
-		r.timer.Stop()
-	}
+	r.timerMgr.Stop()
 
 	// Broadcast selection
 	msg, _ := NewMessage(MessageTypeChampionSelected, ChampionSelectedPayload{
-		Phase:      r.draftState.CurrentPhase,
+		Phase:      r.getDraftState().CurrentPhase,
 		Team:       string(phase.Team),
 		ActionType: string(phase.ActionType),
 		ChampionID: *championID,
 	})
-	r.broadcastMessageLocked(msg)
+	r.emitter.Broadcast(msg)
 
 	// Move to next phase
-	r.advancePhase()
+	r.draftMgr.advancePhase()
 }
 
 func (r *Room) handleHoverChampion(req *HoverChampionRequest) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if !r.draftState.Started {
+	if !r.getDraftState().Started {
 		return
 	}
 
@@ -483,27 +466,27 @@ func (r *Room) handleHoverChampion(req *HoverChampionRequest) {
 		Side:       req.Client.side,
 		ChampionID: req.ChampionID,
 	})
-	r.broadcastMessageLocked(msg)
+	r.emitter.Broadcast(msg)
 }
 
 func (r *Room) handleReady(req *ReadyRequest) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.draftState.Started {
+	if r.getDraftState().Started {
 		return
 	}
 
 	switch req.Client.side {
 	case "blue":
-		r.draftState.BlueReady = req.Ready
+		r.getDraftState().BlueReady = req.Ready
 	case "red":
-		r.draftState.RedReady = req.Ready
+		r.getDraftState().RedReady = req.Ready
 	}
 
 	req.Client.ready = req.Ready
 
-	r.broadcastPlayerUpdate(req.Client.side, &PlayerInfo{
+	r.emitter.PlayerUpdate(req.Client.side, &PlayerInfo{
 		UserID:      req.Client.userID.String(),
 		DisplayName: r.getUserDisplayName(req.Client.userID),
 		Ready:       req.Ready,
@@ -514,7 +497,7 @@ func (r *Room) handleStartDraft(client *Client) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.draftState.Started {
+	if r.getDraftState().Started {
 		client.sendError("ALREADY_STARTED", "Draft already started")
 		return
 	}
@@ -524,13 +507,12 @@ func (r *Room) handleStartDraft(client *Client) {
 		return
 	}
 
-	if !r.draftState.BlueReady || !r.draftState.RedReady {
+	if !r.getDraftState().BlueReady || !r.getDraftState().RedReady {
 		client.sendError("NOT_READY", "Both players must be ready")
 		return
 	}
 
-	r.draftState.Started = true
-	r.timerStartedAt = time.Now()
+	r.getDraftState().Started = true
 
 	phase := domain.GetPhase(0)
 
@@ -540,258 +522,25 @@ func (r *Room) handleStartDraft(client *Client) {
 		ActionType:       string(phase.ActionType),
 		TimerRemainingMs: r.timerDurationMs,
 	})
-	r.broadcastMessageLocked(msg)
+	r.emitter.Broadcast(msg)
 
 	// Send STATE_SYNC to ensure room.status updates to 'in_progress'
 	for client := range r.clients {
 		r.sendStateSyncLocked(client)
 	}
 
-	r.startTimer()
-}
-
-func (r *Room) startTimer() {
-	r.timerStartedAt = time.Now()
-
-	// Timer fires after main duration + buffer period
-	totalDuration := r.timerDurationMs + bufferDurationMs
-	r.timer = time.AfterFunc(time.Duration(totalDuration)*time.Millisecond, func() {
-		r.handleTimerExpired()
-	})
-
-	// Start ticker for timer updates
-	go r.runTimerTicker()
-}
-
-func (r *Room) runTimerTicker() {
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		r.mu.RLock()
-		if !r.draftState.Started || r.draftState.IsComplete {
-			r.mu.RUnlock()
-			return
-		}
-
-		// Skip tick if paused
-		if r.isPaused {
-			r.mu.RUnlock()
-			continue
-		}
-
-		elapsed := time.Since(r.timerStartedAt)
-		remaining := r.timerDurationMs - int(elapsed.Milliseconds())
-
-		// Check if we're in the buffer period (past main timer but before auto-lock)
-		isBufferPeriod := remaining <= 0
-
-		// Display 0 during buffer period (don't show negative)
-		displayRemaining := remaining
-		if displayRemaining < 0 {
-			displayRemaining = 0
-		}
-		r.mu.RUnlock()
-
-		msg, _ := NewMessage(MessageTypeTimerTick, TimerTickPayload{
-			RemainingMs:    displayRemaining,
-			IsBufferPeriod: isBufferPeriod,
-		})
-		r.broadcast <- msg
-
-		// Stop ticker after buffer period expires
-		if remaining <= -bufferDurationMs {
-			return
-		}
-	}
+	r.timerMgr.Start()
 }
 
 func (r *Room) handleTimerExpired() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.draftState.IsComplete || r.isPaused {
+	if r.pauseMgr.IsPaused() {
 		return
 	}
 
-	phase := domain.GetPhase(r.draftState.CurrentPhase)
-	if phase == nil {
-		return
-	}
-
-	var championID string
-
-	if phase.ActionType == domain.ActionTypeBan {
-		// Missed ban - use "None" (skip the ban)
-		championID = "None"
-	} else {
-		// Missed pick - select a random available champion
-		championID = r.getRandomAvailableChampion()
-	}
-
-	r.applySelection(phase, championID)
-
-	// Stop current timer
-	if r.timer != nil {
-		r.timer.Stop()
-	}
-
-	// Broadcast selection
-	msg, _ := NewMessage(MessageTypeChampionSelected, ChampionSelectedPayload{
-		Phase:      r.draftState.CurrentPhase,
-		Team:       string(phase.Team),
-		ActionType: string(phase.ActionType),
-		ChampionID: championID,
-	})
-	r.broadcastMessageLocked(msg)
-
-	r.advancePhase()
-}
-
-func (r *Room) advancePhase() {
-	r.draftState.CurrentPhase++
-
-	// Clear hover for next phase
-	r.currentHover = make(map[string]*string)
-
-	if r.draftState.CurrentPhase >= domain.TotalPhases() {
-		r.draftState.IsComplete = true
-
-		msg, _ := NewMessage(MessageTypeDraftCompleted, DraftCompletedPayload{
-			BlueBans:  r.draftState.BlueBans,
-			RedBans:   r.draftState.RedBans,
-			BluePicks: r.draftState.BluePicks,
-			RedPicks:  r.draftState.RedPicks,
-		})
-		r.broadcastMessageLocked(msg)
-
-		// Send STATE_SYNC to ensure room.status updates to 'completed'
-		for client := range r.clients {
-			r.sendStateSyncLocked(client)
-		}
-
-		return
-	}
-
-	phase := domain.GetPhase(r.draftState.CurrentPhase)
-
-	msg, _ := NewMessage(MessageTypePhaseChanged, PhaseChangedPayload{
-		CurrentPhase:     r.draftState.CurrentPhase,
-		CurrentTeam:      string(phase.Team),
-		ActionType:       string(phase.ActionType),
-		TimerRemainingMs: r.timerDurationMs,
-	})
-	r.broadcastMessageLocked(msg)
-
-	r.startTimer()
-}
-
-func (r *Room) applySelection(phase *domain.Phase, championID string) {
-	switch phase.ActionType {
-	case domain.ActionTypeBan:
-		if phase.Team == domain.SideBlue {
-			r.draftState.BlueBans = append(r.draftState.BlueBans, championID)
-		} else {
-			r.draftState.RedBans = append(r.draftState.RedBans, championID)
-		}
-	case domain.ActionTypePick:
-		if phase.Team == domain.SideBlue {
-			r.draftState.BluePicks = append(r.draftState.BluePicks, championID)
-		} else {
-			r.draftState.RedPicks = append(r.draftState.RedPicks, championID)
-		}
-	}
-}
-
-func (r *Room) isChampionUsed(championID string) bool {
-	for _, id := range r.draftState.BlueBans {
-		if id == championID {
-			return true
-		}
-	}
-	for _, id := range r.draftState.RedBans {
-		if id == championID {
-			return true
-		}
-	}
-	for _, id := range r.draftState.BluePicks {
-		if id == championID {
-			return true
-		}
-	}
-	for _, id := range r.draftState.RedPicks {
-		if id == championID {
-			return true
-		}
-	}
-	return false
-}
-
-// getRandomAvailableChampion returns a random champion that hasn't been picked or banned
-func (r *Room) getRandomAvailableChampion() string {
-	if r.championRepo == nil {
-		log.Printf("Warning: championRepo is nil, cannot get random champion")
-		return "None"
-	}
-
-	champions, err := r.championRepo.GetAll(context.Background())
-	if err != nil {
-		log.Printf("Error getting champions: %v", err)
-		return "None"
-	}
-
-	// Filter out used champions
-	var available []string
-	for _, c := range champions {
-		if !r.isChampionUsed(c.ID) {
-			available = append(available, c.ID)
-		}
-	}
-
-	if len(available) == 0 {
-		log.Printf("Warning: no available champions for random pick")
-		return "None"
-	}
-
-	// Pick a random one
-	return available[rand.Intn(len(available))]
-}
-
-func (r *Room) broadcastMessage(msg *Message) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	r.broadcastMessageLocked(msg)
-}
-
-func (r *Room) broadcastMessageLocked(msg *Message) {
-	data, _ := json.Marshal(msg)
-	for client := range r.clients {
-		r.trySend(client, data)
-	}
-}
-
-// trySend attempts to send to a client, safely handling closed channels
-func (r *Room) trySend(client *Client, data []byte) {
-	defer func() {
-		if recover() != nil {
-			// Channel closed, client is disconnecting - skip silently
-		}
-	}()
-
-	select {
-	case client.send <- data:
-	default:
-		// Buffer full, skip
-	}
-}
-
-func (r *Room) broadcastPlayerUpdate(side string, player *PlayerInfo, action string) {
-	msg, _ := NewMessage(MessageTypePlayerUpdate, PlayerUpdatePayload{
-		Side:   side,
-		Player: player,
-		Action: action,
-	})
-	r.broadcastMessageLocked(msg)
+	r.draftMgr.HandleTimerExpired()
 }
 
 func (r *Room) sendStateSync(client *Client) {
@@ -800,25 +549,31 @@ func (r *Room) sendStateSync(client *Client) {
 	r.sendStateSyncLocked(client)
 }
 
+// syncAllClients sends state sync to all connected clients.
+// Called by DraftStateManager after state changes.
+func (r *Room) syncAllClients() {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for client := range r.clients {
+		r.sendStateSyncLocked(client)
+	}
+}
+
 func (r *Room) sendStateSyncLocked(client *Client) {
 	var currentTeam, actionType string
 	timerRemaining := r.timerDurationMs
 
-	if phase := domain.GetPhase(r.draftState.CurrentPhase); phase != nil {
+	if phase := domain.GetPhase(r.getDraftState().CurrentPhase); phase != nil {
 		currentTeam = string(phase.Team)
 		actionType = string(phase.ActionType)
 	}
 
-	if r.draftState.Started && !r.draftState.IsComplete {
-		if r.isPaused {
+	if r.getDraftState().Started && !r.getDraftState().IsComplete {
+		if r.pauseMgr.IsPaused() {
 			// When paused, use the frozen timer value
-			timerRemaining = r.pauseRemainingMs
+			timerRemaining = r.pauseMgr.GetFrozenTimerMs()
 		} else {
-			elapsed := time.Since(r.timerStartedAt)
-			timerRemaining = r.timerDurationMs - int(elapsed.Milliseconds())
-			if timerRemaining < 0 {
-				timerRemaining = 0
-			}
+			timerRemaining = r.timerMgr.GetRemaining()
 		}
 	}
 
@@ -827,20 +582,20 @@ func (r *Room) sendStateSyncLocked(client *Client) {
 		bluePlayer = &PlayerInfo{
 			UserID:      r.blueClient.userID.String(),
 			DisplayName: r.getUserDisplayName(r.blueClient.userID),
-			Ready:       r.draftState.BlueReady,
+			Ready:       r.getDraftState().BlueReady,
 		}
 	}
 	if r.redClient != nil {
 		redPlayer = &PlayerInfo{
 			UserID:      r.redClient.userID.String(),
 			DisplayName: r.getUserDisplayName(r.redClient.userID),
-			Ready:       r.draftState.RedReady,
+			Ready:       r.getDraftState().RedReady,
 		}
 	}
 
 	status := "waiting"
-	if r.draftState.Started {
-		if r.draftState.IsComplete {
+	if r.getDraftState().Started {
+		if r.getDraftState().IsComplete {
 			status = "completed"
 		} else {
 			status = "in_progress"
@@ -880,25 +635,13 @@ func (r *Room) sendStateSyncLocked(client *Client) {
 		}
 	}
 
-	// Build pending edit info if exists
-	var pendingEditInfo *PendingEditInfo
-	if r.pendingEdit != nil {
-		pendingEditInfo = &PendingEditInfo{
-			ProposedBy:    r.getUserDisplayName(r.pendingEdit.ProposedBy),
-			ProposedSide:  r.pendingEdit.ProposedSide,
-			SlotType:      r.pendingEdit.SlotType,
-			Team:          r.pendingEdit.Team,
-			SlotIndex:     r.pendingEdit.SlotIndex,
-			OldChampionID: r.pendingEdit.OldChampionID,
-			NewChampionID: r.pendingEdit.NewChampionID,
-			ExpiresAt:     r.pendingEdit.ExpiresAt.UnixMilli(),
-		}
-	}
+	// Build pending edit info from EditManager
+	pendingEditInfo := r.editMgr.BuildPendingEditInfo()
 
 	// Get paused by display name
 	pausedByName := ""
-	if r.pausedBy != nil {
-		pausedByName = r.getUserDisplayName(*r.pausedBy)
+	if pausedByID := r.pauseMgr.GetPausedBy(); pausedByID != nil {
+		pausedByName = r.getUserDisplayName(*pausedByID)
 	}
 
 	msg, _ := NewMessage(MessageTypeStateSync, StateSyncPayload{
@@ -910,22 +653,22 @@ func (r *Room) sendStateSyncLocked(client *Client) {
 			TimerDuration: r.timerDurationMs,
 		},
 		Draft: DraftInfo{
-			CurrentPhase:     r.draftState.CurrentPhase,
+			CurrentPhase:     r.getDraftState().CurrentPhase,
 			CurrentTeam:      currentTeam,
 			ActionType:       actionType,
 			TimerRemainingMs: timerRemaining,
-			BlueBans:         r.draftState.BlueBans,
-			RedBans:          r.draftState.RedBans,
-			BluePicks:        r.draftState.BluePicks,
-			RedPicks:         r.draftState.RedPicks,
-			IsComplete:       r.draftState.IsComplete,
-			IsPaused:         r.isPaused,
+			BlueBans:         r.getDraftState().BlueBans,
+			RedBans:          r.getDraftState().RedBans,
+			BluePicks:        r.getDraftState().BluePicks,
+			RedPicks:         r.getDraftState().RedPicks,
+			IsComplete:       r.getDraftState().IsComplete,
+			IsPaused:         r.pauseMgr.IsPaused(),
 			PausedBy:         pausedByName,
-			PausedBySide:     r.pausedBySide,
+			PausedBySide:     r.pauseMgr.GetPausedBySide(),
 			PendingEdit:      pendingEditInfo,
-			BlueResumeReady:  r.blueResumeReady,
-			RedResumeReady:   r.redResumeReady,
-			ResumeCountdown:  r.resumeCountdown,
+			BlueResumeReady:  func() bool { b, _ := r.pauseMgr.GetResumeReady(); return b }(),
+			RedResumeReady:   func() bool { _, r := r.pauseMgr.GetResumeReady(); return r }(),
+			ResumeCountdown:  r.pauseMgr.GetResumeCountdown(),
 		},
 		Players: PlayersInfo{
 			Blue: bluePlayer,
@@ -962,7 +705,7 @@ func (r *Room) handlePauseDraft(client *Client) {
 	defer r.mu.Unlock()
 
 	// Validate: draft started, not complete, not already paused
-	if !r.draftState.Started || r.draftState.IsComplete || r.isPaused {
+	if !r.getDraftState().Started || r.getDraftState().IsComplete || r.pauseMgr.IsPaused() {
 		client.sendError("INVALID_STATE", "Cannot pause at this time")
 		return
 	}
@@ -979,43 +722,11 @@ func (r *Room) handlePauseDraft(client *Client) {
 		return
 	}
 
-	// Stop current timer and calculate remaining
-	if r.timer != nil {
-		r.timer.Stop()
+	// Delegate to pause manager
+	if err := r.pauseMgr.Pause(client.userID, client.side); err != nil {
+		client.sendError("PAUSE_FAILED", err.Error())
+		return
 	}
-	elapsed := time.Since(r.timerStartedAt)
-	r.pauseRemainingMs = r.timerDurationMs - int(elapsed.Milliseconds())
-	if r.pauseRemainingMs < 0 {
-		r.pauseRemainingMs = 0
-	}
-
-	// Set pause state
-	r.isPaused = true
-	r.pausedBy = &client.userID
-	r.pausedBySide = client.side
-	r.pausedAt = time.Now()
-
-	// Reset resume-ready state
-	r.blueResumeReady = false
-	r.redResumeReady = false
-	r.resumeCountdown = 0
-
-	// Start auto-resume timer (5 minutes)
-	r.pauseTimer = time.AfterFunc(
-		time.Duration(r.maxPauseDurationMs)*time.Millisecond,
-		func() { r.handleAutoResume() },
-	)
-
-	log.Printf("Draft paused by %s (%s side), timer frozen at %dms", client.userID, client.side, r.pauseRemainingMs)
-
-	// Broadcast pause
-	msg, _ := NewMessage(MessageTypeDraftPaused, DraftPausedPayload{
-		PausedBy:         r.getUserDisplayName(client.userID),
-		PausedBySide:     client.side,
-		TimerFrozenAt:    r.pauseRemainingMs,
-		MaxPauseDuration: r.maxPauseDurationMs,
-	})
-	r.broadcastMessageLocked(msg)
 }
 
 // handleResumeDraft handles a resume request from a client
@@ -1027,50 +738,6 @@ func (r *Room) handleResumeDraft(client *Client) {
 	}
 }
 
-// handleAutoResume is called when the pause timer expires
-func (r *Room) handleAutoResume() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if !r.isPaused {
-		return
-	}
-
-	// Cancel any ongoing countdown
-	if r.resumeCountdownCancel != nil {
-		close(r.resumeCountdownCancel)
-		r.resumeCountdownCancel = nil
-	}
-
-	// Clear any pending edit
-	r.clearPendingEdit()
-
-	// Save remaining time before clearing pause state
-	remainingMs := r.pauseRemainingMs
-
-	// Clear pause state and resume-ready state
-	r.isPaused = false
-	r.pausedBy = nil
-	r.pausedBySide = ""
-	r.blueResumeReady = false
-	r.redResumeReady = false
-	r.resumeCountdown = 0
-
-	log.Printf("Draft auto-resumed after pause timeout, timer restarting from %dms", remainingMs)
-
-	// Broadcast resume
-	msg, _ := NewMessage(MessageTypeDraftResumed, DraftResumedPayload{
-		ResumedBy:        "System (timeout)",
-		TimerRemainingMs: remainingMs,
-	})
-	r.broadcastMessageLocked(msg)
-
-	// Restart timer from saved position
-	r.timerStartedAt = time.Now()
-	r.timerDurationMs = remainingMs
-	r.startTimer()
-}
-
 // handleReadyToResume handles a ready-to-resume toggle from a client
 func (r *Room) handleReadyToResume(req *ReadyToResumeRequest) {
 	r.mu.Lock()
@@ -1079,7 +746,7 @@ func (r *Room) handleReadyToResume(req *ReadyToResumeRequest) {
 	client := req.Client
 
 	// Must be paused
-	if !r.isPaused {
+	if !r.pauseMgr.IsPaused() {
 		client.sendError("INVALID_STATE", "Draft is not paused")
 		return
 	}
@@ -1096,149 +763,11 @@ func (r *Room) handleReadyToResume(req *ReadyToResumeRequest) {
 		return
 	}
 
-	// If countdown is in progress and someone un-readies, cancel it
-	if r.resumeCountdown > 0 && !req.Ready {
-		r.cancelResumeCountdown(client)
+	// Delegate to pause manager
+	if err := r.pauseMgr.SetResumeReady(client.userID, client.side, req.Ready); err != nil {
+		client.sendError("RESUME_READY_FAILED", err.Error())
 		return
 	}
-
-	// Update ready state
-	if client.side == "blue" {
-		r.blueResumeReady = req.Ready
-	} else {
-		r.redResumeReady = req.Ready
-	}
-
-	// Broadcast ready update
-	msg, _ := NewMessage(MessageTypeResumeReadyUpdate, ResumeReadyUpdatePayload{
-		BlueReady: r.blueResumeReady,
-		RedReady:  r.redResumeReady,
-	})
-	r.broadcastMessageLocked(msg)
-
-	// Check if both ready - start countdown
-	if r.blueResumeReady && r.redResumeReady && r.resumeCountdown == 0 {
-		r.startResumeCountdown()
-	}
-}
-
-// startResumeCountdown starts the 5-second countdown before resuming
-func (r *Room) startResumeCountdown() {
-	r.resumeCountdown = 5
-	r.resumeCountdownCancel = make(chan struct{})
-
-	// Broadcast initial countdown
-	msg, _ := NewMessage(MessageTypeResumeCountdown, ResumeCountdownPayload{
-		SecondsRemaining: 5,
-	})
-	r.broadcastMessageLocked(msg)
-
-	log.Printf("Resume countdown started (5 seconds)")
-
-	// Start countdown in goroutine
-	go r.runResumeCountdownTicker()
-}
-
-// runResumeCountdownTicker ticks down the resume countdown
-func (r *Room) runResumeCountdownTicker() {
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-r.resumeCountdownCancel:
-			return
-		case <-ticker.C:
-			r.mu.Lock()
-
-			if r.resumeCountdown <= 0 {
-				r.mu.Unlock()
-				return
-			}
-
-			r.resumeCountdown--
-
-			if r.resumeCountdown <= 0 {
-				// Countdown complete - resume draft
-				r.doResumeDraft()
-				r.mu.Unlock()
-				return
-			}
-
-			// Broadcast countdown tick
-			msg, _ := NewMessage(MessageTypeResumeCountdown, ResumeCountdownPayload{
-				SecondsRemaining: r.resumeCountdown,
-			})
-			r.broadcastMessageLocked(msg)
-			r.mu.Unlock()
-		}
-	}
-}
-
-// cancelResumeCountdown cancels an ongoing resume countdown
-func (r *Room) cancelResumeCountdown(client *Client) {
-	// Stop countdown goroutine
-	if r.resumeCountdownCancel != nil {
-		close(r.resumeCountdownCancel)
-		r.resumeCountdownCancel = nil
-	}
-
-	// Reset state
-	r.resumeCountdown = 0
-	r.blueResumeReady = false
-	r.redResumeReady = false
-
-	log.Printf("Resume countdown cancelled by %s", client.userID)
-
-	// Broadcast cancellation
-	msg, _ := NewMessage(MessageTypeResumeCountdown, ResumeCountdownPayload{
-		SecondsRemaining: 0,
-		CancelledBy:      r.getUserDisplayName(client.userID),
-	})
-	r.broadcastMessageLocked(msg)
-
-	// Broadcast ready update (both false)
-	readyMsg, _ := NewMessage(MessageTypeResumeReadyUpdate, ResumeReadyUpdatePayload{
-		BlueReady: false,
-		RedReady:  false,
-	})
-	r.broadcastMessageLocked(readyMsg)
-}
-
-// doResumeDraft actually resumes the draft after countdown completes
-func (r *Room) doResumeDraft() {
-	// Clear any pending edit
-	r.clearPendingEdit()
-
-	// Stop auto-resume timer
-	if r.pauseTimer != nil {
-		r.pauseTimer.Stop()
-	}
-
-	// Save remaining time
-	remainingMs := r.pauseRemainingMs
-
-	// Clear pause and resume-ready state
-	r.isPaused = false
-	r.pausedBy = nil
-	r.pausedBySide = ""
-	r.blueResumeReady = false
-	r.redResumeReady = false
-	r.resumeCountdown = 0
-
-	log.Printf("Draft resumed after countdown, timer restarting from %dms", remainingMs)
-
-	// Broadcast resume
-	msg, _ := NewMessage(MessageTypeDraftResumed, DraftResumedPayload{
-		ResumedBy:        "Both players ready",
-		TimerRemainingMs: remainingMs,
-	})
-	r.broadcastMessageLocked(msg)
-
-	// Restart timer from saved position
-	r.timerStartedAt = time.Now()
-	r.timerDurationMs = remainingMs
-	r.startTimer()
 }
 
 // handleProposeEdit handles an edit proposal from a client
@@ -1250,7 +779,7 @@ func (r *Room) handleProposeEdit(req *ProposeEditRequest) {
 	payload := req.Payload
 
 	// Must be paused
-	if !r.isPaused {
+	if !r.pauseMgr.IsPaused() {
 		client.sendError("INVALID_STATE", "Must pause to edit")
 		return
 	}
@@ -1267,58 +796,15 @@ func (r *Room) handleProposeEdit(req *ProposeEditRequest) {
 		return
 	}
 
-	// No pending edit already
-	if r.pendingEdit != nil {
-		client.sendError("EDIT_PENDING", "An edit is already pending")
+	// Delegate to EditManager
+	if err := r.editMgr.ProposeEdit(client.userID, client.side, payload); err != nil {
+		if editErr, ok := err.(*EditError); ok {
+			client.sendError(editErr.Code, editErr.Message)
+		} else {
+			client.sendError("EDIT_ERROR", err.Error())
+		}
 		return
 	}
-
-	// Validate slot exists and get old champion
-	oldChampionID, err := r.getChampionAtSlot(payload.SlotType, payload.Team, payload.SlotIndex)
-	if err != nil {
-		client.sendError("INVALID_SLOT", err.Error())
-		return
-	}
-
-	// Validate new champion is available (not already picked/banned elsewhere)
-	if r.isChampionUsedExcept(payload.ChampionID, payload.SlotType, payload.Team, payload.SlotIndex) {
-		client.sendError("CHAMPION_UNAVAILABLE", "Champion already used")
-		return
-	}
-
-	// Create pending edit
-	r.pendingEdit = &PendingEdit{
-		ProposedBy:    client.userID,
-		ProposedSide:  client.side,
-		SlotType:      payload.SlotType,
-		Team:          payload.Team,
-		SlotIndex:     payload.SlotIndex,
-		OldChampionID: oldChampionID,
-		NewChampionID: payload.ChampionID,
-		ExpiresAt:     time.Now().Add(30 * time.Second),
-	}
-
-	// Start timeout timer
-	r.editTimeout = time.AfterFunc(30*time.Second, func() {
-		r.handleEditTimeout()
-	})
-
-	log.Printf("Edit proposed by %s: %s %s slot %d: %s -> %s",
-		client.userID, payload.Team, payload.SlotType, payload.SlotIndex,
-		oldChampionID, payload.ChampionID)
-
-	// Broadcast proposal
-	msg, _ := NewMessage(MessageTypeEditProposed, EditProposedPayload{
-		ProposedBy:    r.getUserDisplayName(client.userID),
-		ProposedSide:  client.side,
-		SlotType:      payload.SlotType,
-		Team:          payload.Team,
-		SlotIndex:     payload.SlotIndex,
-		OldChampionID: oldChampionID,
-		NewChampionID: payload.ChampionID,
-		ExpiresAt:     r.pendingEdit.ExpiresAt.UnixMilli(),
-	})
-	r.broadcastMessageLocked(msg)
 }
 
 // handleConfirmEdit handles an edit confirmation from a client
@@ -1326,51 +812,25 @@ func (r *Room) handleConfirmEdit(client *Client) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.pendingEdit == nil {
-		client.sendError("NO_EDIT", "No edit pending")
-		return
-	}
-
-	// Confirmer must be captain of opposite side
-	if client.side == r.pendingEdit.ProposedSide {
-		client.sendError("INVALID_CONFIRM", "Cannot confirm your own edit")
-		return
-	}
+	// Authorization: must be captain/player
 	if r.isTeamDraft && !r.isCaptain(client.userID, client.side) {
 		client.sendError("UNAUTHORIZED", "Only captains can confirm edits")
 		return
 	}
-
-	// In 1v1 mode, only the opposite player can confirm
 	if !r.isTeamDraft && client.side != "blue" && client.side != "red" {
 		client.sendError("UNAUTHORIZED", "Only players can confirm edits")
 		return
 	}
 
-	// Apply the edit
-	r.applyEdit(r.pendingEdit)
-
-	log.Printf("Edit confirmed by %s: %s %s slot %d: %s -> %s",
-		client.userID, r.pendingEdit.Team, r.pendingEdit.SlotType, r.pendingEdit.SlotIndex,
-		r.pendingEdit.OldChampionID, r.pendingEdit.NewChampionID)
-
-	// Clear pending edit
-	edit := r.pendingEdit
-	r.clearPendingEdit()
-
-	// Broadcast edit applied
-	msg, _ := NewMessage(MessageTypeEditApplied, EditAppliedPayload{
-		SlotType:      edit.SlotType,
-		Team:          edit.Team,
-		SlotIndex:     edit.SlotIndex,
-		OldChampionID: edit.OldChampionID,
-		NewChampionID: edit.NewChampionID,
-		BlueBans:      r.draftState.BlueBans,
-		RedBans:       r.draftState.RedBans,
-		BluePicks:     r.draftState.BluePicks,
-		RedPicks:      r.draftState.RedPicks,
-	})
-	r.broadcastMessageLocked(msg)
+	// Delegate to EditManager
+	if err := r.editMgr.ConfirmEdit(client.userID, client.side); err != nil {
+		if editErr, ok := err.(*EditError); ok {
+			client.sendError(editErr.Code, editErr.Message)
+		} else {
+			client.sendError("EDIT_ERROR", err.Error())
+		}
+		return
+	}
 }
 
 // handleRejectEdit handles an edit rejection from a client
@@ -1378,140 +838,14 @@ func (r *Room) handleRejectEdit(client *Client) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.pendingEdit == nil {
-		client.sendError("NO_EDIT", "No edit pending")
+	// Delegate to EditManager
+	if err := r.editMgr.RejectEdit(client.userID, client.side); err != nil {
+		if editErr, ok := err.(*EditError); ok {
+			client.sendError(editErr.Code, editErr.Message)
+		} else {
+			client.sendError("EDIT_ERROR", err.Error())
+		}
 		return
 	}
-
-	// Rejecter must be captain of opposite side
-	if client.side == r.pendingEdit.ProposedSide {
-		client.sendError("INVALID_REJECT", "Cannot reject your own edit")
-		return
-	}
-
-	log.Printf("Edit rejected by %s", client.userID)
-
-	// Clear pending edit
-	r.clearPendingEdit()
-
-	// Broadcast rejection
-	msg, _ := NewMessage(MessageTypeEditRejected, EditRejectedPayload{
-		RejectedBy:   r.getUserDisplayName(client.userID),
-		RejectedSide: client.side,
-	})
-	r.broadcastMessageLocked(msg)
 }
 
-// handleEditTimeout is called when an edit proposal times out
-func (r *Room) handleEditTimeout() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if r.pendingEdit == nil {
-		return
-	}
-
-	log.Printf("Edit proposal timed out")
-
-	// Clear pending edit
-	r.clearPendingEdit()
-
-	// Broadcast rejection (timeout)
-	msg, _ := NewMessage(MessageTypeEditRejected, EditRejectedPayload{
-		RejectedBy:   "System (timeout)",
-		RejectedSide: "",
-	})
-	r.broadcastMessageLocked(msg)
-}
-
-// clearPendingEdit clears the pending edit and stops the timeout timer
-func (r *Room) clearPendingEdit() {
-	if r.editTimeout != nil {
-		r.editTimeout.Stop()
-		r.editTimeout = nil
-	}
-	r.pendingEdit = nil
-}
-
-// applyEdit applies a pending edit to the draft state
-func (r *Room) applyEdit(edit *PendingEdit) {
-	var arr *[]string
-	switch {
-	case edit.SlotType == "ban" && edit.Team == "blue":
-		arr = &r.draftState.BlueBans
-	case edit.SlotType == "ban" && edit.Team == "red":
-		arr = &r.draftState.RedBans
-	case edit.SlotType == "pick" && edit.Team == "blue":
-		arr = &r.draftState.BluePicks
-	case edit.SlotType == "pick" && edit.Team == "red":
-		arr = &r.draftState.RedPicks
-	}
-
-	if arr != nil && edit.SlotIndex < len(*arr) {
-		(*arr)[edit.SlotIndex] = edit.NewChampionID
-	}
-}
-
-// getChampionAtSlot returns the champion at the specified slot
-func (r *Room) getChampionAtSlot(slotType, team string, slotIndex int) (string, error) {
-	var arr []string
-	switch {
-	case slotType == "ban" && team == "blue":
-		arr = r.draftState.BlueBans
-	case slotType == "ban" && team == "red":
-		arr = r.draftState.RedBans
-	case slotType == "pick" && team == "blue":
-		arr = r.draftState.BluePicks
-	case slotType == "pick" && team == "red":
-		arr = r.draftState.RedPicks
-	default:
-		return "", fmt.Errorf("invalid slot type or team")
-	}
-
-	if slotIndex < 0 || slotIndex >= len(arr) {
-		return "", fmt.Errorf("slot index out of range")
-	}
-
-	return arr[slotIndex], nil
-}
-
-// isChampionUsedExcept checks if a champion is used anywhere except the specified slot
-func (r *Room) isChampionUsedExcept(championID, exceptSlotType, exceptTeam string, exceptSlotIndex int) bool {
-	// Check blue bans
-	for i, id := range r.draftState.BlueBans {
-		if id == championID {
-			if exceptSlotType == "ban" && exceptTeam == "blue" && i == exceptSlotIndex {
-				continue // This is the slot being edited
-			}
-			return true
-		}
-	}
-	// Check red bans
-	for i, id := range r.draftState.RedBans {
-		if id == championID {
-			if exceptSlotType == "ban" && exceptTeam == "red" && i == exceptSlotIndex {
-				continue
-			}
-			return true
-		}
-	}
-	// Check blue picks
-	for i, id := range r.draftState.BluePicks {
-		if id == championID {
-			if exceptSlotType == "pick" && exceptTeam == "blue" && i == exceptSlotIndex {
-				continue
-			}
-			return true
-		}
-	}
-	// Check red picks
-	for i, id := range r.draftState.RedPicks {
-		if id == championID {
-			if exceptSlotType == "pick" && exceptTeam == "red" && i == exceptSlotIndex {
-				continue
-			}
-			return true
-		}
-	}
-	return false
-}

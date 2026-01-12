@@ -25,23 +25,16 @@ type PauseManager struct {
 	resumeCountdown       int
 	resumeCountdownCancel chan struct{}
 
-	// Dependencies
-	emitter    *EventEmitter
-	timerMgr   *TimerManager
-	onResume   func(remainingMs int) // Callback when draft resumes
-	getUserName func(uuid.UUID) string
+	room *Room
 
 	mu sync.RWMutex
 }
 
 // NewPauseManager creates a new pause manager.
-func NewPauseManager(emitter *EventEmitter, timerMgr *TimerManager, getUserName func(uuid.UUID) string, onResume func(remainingMs int)) *PauseManager {
+func NewPauseManager(room *Room) *PauseManager {
 	return &PauseManager{
 		maxPauseDurationMs: 300000, // 5 minutes
-		emitter:            emitter,
-		timerMgr:           timerMgr,
-		getUserName:        getUserName,
-		onResume:           onResume,
+		room:               room,
 	}
 }
 
@@ -97,7 +90,7 @@ func (pm *PauseManager) Pause(userID uuid.UUID, side string) error {
 	}
 
 	// Pause the timer and get remaining time
-	pm.frozenTimerMs = pm.timerMgr.Pause()
+	pm.frozenTimerMs = pm.room.timerMgr.Pause()
 
 	// Set pause state
 	pm.isPaused = true
@@ -119,7 +112,7 @@ func (pm *PauseManager) Pause(userID uuid.UUID, side string) error {
 	log.Printf("Draft paused by %s (%s side), timer frozen at %dms", userID, side, pm.frozenTimerMs)
 
 	// Broadcast pause event
-	pm.emitter.DraftPaused(pm.getUserName(userID), side, pm.frozenTimerMs, pm.maxPauseDurationMs)
+	pm.room.emitter.DraftPaused(pm.room.getUserDisplayName(userID), side, pm.frozenTimerMs, pm.maxPauseDurationMs)
 
 	return nil
 }
@@ -147,7 +140,7 @@ func (pm *PauseManager) SetResumeReady(userID uuid.UUID, side string, ready bool
 	}
 
 	// Broadcast ready update
-	pm.emitter.ResumeReadyUpdate(pm.blueResumeReady, pm.redResumeReady)
+	pm.room.emitter.ResumeReadyUpdate(pm.blueResumeReady, pm.redResumeReady)
 
 	// Check if both ready - start countdown
 	if pm.blueResumeReady && pm.redResumeReady && pm.resumeCountdown == 0 {
@@ -164,7 +157,7 @@ func (pm *PauseManager) startCountdownLocked() {
 	pm.resumeCountdownCancel = make(chan struct{})
 
 	// Broadcast initial countdown
-	pm.emitter.ResumeCountdown(5, "")
+	pm.room.emitter.ResumeCountdown(5, "")
 
 	log.Printf("Resume countdown started (5 seconds)")
 
@@ -199,7 +192,7 @@ func (pm *PauseManager) runCountdownTicker() {
 			}
 
 			// Broadcast countdown tick
-			pm.emitter.ResumeCountdown(pm.resumeCountdown, "")
+			pm.room.emitter.ResumeCountdown(pm.resumeCountdown, "")
 			pm.mu.Unlock()
 		}
 	}
@@ -222,10 +215,10 @@ func (pm *PauseManager) cancelCountdownLocked(cancelledBy uuid.UUID) {
 	log.Printf("Resume countdown cancelled by %s", cancelledBy)
 
 	// Broadcast cancellation
-	pm.emitter.ResumeCountdown(0, pm.getUserName(cancelledBy))
+	pm.room.emitter.ResumeCountdown(0, pm.room.getUserDisplayName(cancelledBy))
 
 	// Broadcast ready update (both false)
-	pm.emitter.ResumeReadyUpdate(false, false)
+	pm.room.emitter.ResumeReadyUpdate(false, false)
 }
 
 // doResumeLocked actually resumes the draft after countdown completes.
@@ -251,12 +244,14 @@ func (pm *PauseManager) doResumeLocked() {
 	log.Printf("Draft resumed after countdown, timer restarting from %dms", remainingMs)
 
 	// Broadcast resume
-	pm.emitter.DraftResumed("Both players ready", remainingMs)
+	pm.room.emitter.DraftResumed("Both players ready", remainingMs)
 
-	// Callback to room to restart timer
-	if pm.onResume != nil {
-		pm.onResume(remainingMs)
+	// Clear any pending edit and restart timer
+	if pm.room.editMgr != nil {
+		pm.room.editMgr.Clear()
 	}
+	pm.room.timerMgr.SetDuration(remainingMs)
+	pm.room.timerMgr.Start()
 }
 
 // handleAutoResume is called when the pause timer expires.
@@ -288,18 +283,14 @@ func (pm *PauseManager) handleAutoResume() {
 	log.Printf("Draft auto-resumed after pause timeout, timer restarting from %dms", remainingMs)
 
 	// Broadcast resume
-	pm.emitter.DraftResumed("System (timeout)", remainingMs)
+	pm.room.emitter.DraftResumed("System (timeout)", remainingMs)
 
-	// Callback to room to restart timer
-	if pm.onResume != nil {
-		pm.onResume(remainingMs)
+	// Clear any pending edit and restart timer
+	if pm.room.editMgr != nil {
+		pm.room.editMgr.Clear()
 	}
-}
-
-// ClearForEdit is called when clearing pending edit (needed for resume).
-func (pm *PauseManager) ClearForEdit() {
-	// This is a hook for the room to clear pending edits when resuming
-	// The actual edit clearing is done by EditManager
+	pm.room.timerMgr.SetDuration(remainingMs)
+	pm.room.timerMgr.Start()
 }
 
 // Errors

@@ -23,33 +23,17 @@ type PendingEdit struct {
 
 // EditManager handles edit proposal, confirmation, and rejection logic.
 type EditManager struct {
-	pendingEdit  *PendingEdit
-	editTimeout  *time.Timer
-
-	// Dependencies
-	emitter        *EventEmitter
-	getUserName    func(uuid.UUID) string
-	getDraftState  func() *DraftState
-	applyEdit      func(edit *PendingEdit)
-	isChampionUsed func(championID string, exceptSlotType, exceptTeam string, exceptSlotIndex int) bool
+	pendingEdit *PendingEdit
+	editTimeout *time.Timer
+	room        *Room
 
 	mu sync.RWMutex
 }
 
 // NewEditManager creates a new edit manager.
-func NewEditManager(
-	emitter *EventEmitter,
-	getUserName func(uuid.UUID) string,
-	getDraftState func() *DraftState,
-	applyEdit func(edit *PendingEdit),
-	isChampionUsed func(championID string, exceptSlotType, exceptTeam string, exceptSlotIndex int) bool,
-) *EditManager {
+func NewEditManager(room *Room) *EditManager {
 	return &EditManager{
-		emitter:        emitter,
-		getUserName:    getUserName,
-		getDraftState:  getDraftState,
-		applyEdit:      applyEdit,
-		isChampionUsed: isChampionUsed,
+		room: room,
 	}
 }
 
@@ -78,7 +62,7 @@ func (em *EditManager) ProposeEdit(userID uuid.UUID, side string, payload Propos
 	}
 
 	// Get current draft state to validate slot
-	draftState := em.getDraftState()
+	draftState := em.room.getDraftState()
 
 	// Validate slot exists and get old champion
 	oldChampionID, err := em.getChampionAtSlot(draftState, payload.SlotType, payload.Team, payload.SlotIndex)
@@ -87,7 +71,7 @@ func (em *EditManager) ProposeEdit(userID uuid.UUID, side string, payload Propos
 	}
 
 	// Validate new champion is available (not already picked/banned elsewhere)
-	if em.isChampionUsed(payload.ChampionID, payload.SlotType, payload.Team, payload.SlotIndex) {
+	if em.room.draftMgr.IsChampionUsedExcept(payload.ChampionID, payload.SlotType, payload.Team, payload.SlotIndex) {
 		return &EditError{"champion_unavailable", "Champion already used"}
 	}
 
@@ -111,8 +95,8 @@ func (em *EditManager) ProposeEdit(userID uuid.UUID, side string, payload Propos
 		oldChampionID, payload.ChampionID)
 
 	// Broadcast proposal
-	em.emitter.EditProposed(
-		em.getUserName(userID),
+	em.room.emitter.EditProposed(
+		em.room.getUserDisplayName(userID),
 		side,
 		payload.SlotType,
 		payload.Team,
@@ -140,17 +124,17 @@ func (em *EditManager) ConfirmEdit(userID uuid.UUID, side string) error {
 	}
 
 	// Apply the edit
-	em.applyEdit(em.pendingEdit)
+	em.room.draftMgr.ApplyEdit(em.pendingEdit)
 
 	log.Printf("Edit confirmed by %s: %s %s slot %d: %s -> %s",
 		userID, em.pendingEdit.Team, em.pendingEdit.SlotType, em.pendingEdit.SlotIndex,
 		em.pendingEdit.OldChampionID, em.pendingEdit.NewChampionID)
 
 	// Get updated draft state for broadcast
-	draftState := em.getDraftState()
+	draftState := em.room.getDraftState()
 
 	// Broadcast edit applied
-	em.emitter.EditApplied(
+	em.room.emitter.EditApplied(
 		em.pendingEdit.SlotType,
 		em.pendingEdit.Team,
 		em.pendingEdit.SlotIndex,
@@ -185,7 +169,7 @@ func (em *EditManager) RejectEdit(userID uuid.UUID, side string) error {
 	log.Printf("Edit rejected by %s", userID)
 
 	// Broadcast rejection
-	em.emitter.EditRejected(em.getUserName(userID), side)
+	em.room.emitter.EditRejected(em.room.getUserDisplayName(userID), side)
 
 	// Clear pending edit
 	em.clearLocked()
@@ -222,7 +206,7 @@ func (em *EditManager) handleTimeout() {
 	log.Printf("Edit proposal timed out")
 
 	// Broadcast rejection (timeout)
-	em.emitter.EditRejected("System (timeout)", "")
+	em.room.emitter.EditRejected("System (timeout)", "")
 
 	// Clear pending edit
 	em.clearLocked()
@@ -261,7 +245,7 @@ func (em *EditManager) BuildPendingEditInfo() *PendingEditInfo {
 	}
 
 	return &PendingEditInfo{
-		ProposedBy:    em.getUserName(em.pendingEdit.ProposedBy),
+		ProposedBy:    em.room.getUserDisplayName(em.pendingEdit.ProposedBy),
 		ProposedSide:  em.pendingEdit.ProposedSide,
 		SlotType:      em.pendingEdit.SlotType,
 		Team:          em.pendingEdit.Team,
