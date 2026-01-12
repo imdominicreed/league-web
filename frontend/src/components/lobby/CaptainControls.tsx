@@ -64,6 +64,7 @@ export function CaptainControls({
               ? 'bg-red-600 hover:bg-red-700 text-white'
               : 'bg-green-600 hover:bg-green-700 text-white'
           }`}
+          data-testid="captain-button-ready"
         >
           {isReady ? 'Cancel Ready' : 'Ready Up'}
         </button>
@@ -76,7 +77,7 @@ export function CaptainControls({
             {isCaptain ? 'Captain Controls' : 'Player Actions'}
           </h4>
           {isCaptain && (
-            <span className="text-lol-gold text-xs font-medium px-2 py-1 bg-lol-gold/10 rounded">
+            <span className="text-lol-gold text-xs font-medium px-2 py-1 bg-lol-gold/10 rounded" data-testid="captain-badge">
               Captain
             </span>
           )}
@@ -89,6 +90,7 @@ export function CaptainControls({
               onClick={onTakeCaptain}
               disabled={takingCaptain}
               className="bg-lol-gold/20 hover:bg-lol-gold/30 text-lol-gold px-4 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50"
+              data-testid="captain-button-take"
             >
               {takingCaptain ? 'Taking...' : 'Take Captain'}
             </button>
@@ -102,6 +104,7 @@ export function CaptainControls({
                 onClick={() => setShowPromoteModal(true)}
                 disabled={promotingCaptain || teamPlayers.length === 0}
                 className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50"
+                data-testid="captain-button-promote"
               >
                 Promote Captain
               </button>
@@ -111,6 +114,7 @@ export function CaptainControls({
                 onClick={() => setShowKickModal(true)}
                 disabled={kickingPlayer || teamPlayers.length === 0}
                 className="bg-red-600/20 hover:bg-red-600/30 text-red-400 px-4 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50"
+                data-testid="captain-button-kick"
               >
                 Kick Player
               </button>
@@ -124,6 +128,7 @@ export function CaptainControls({
                     ? 'bg-lol-gold text-black'
                     : 'bg-gray-700 hover:bg-gray-600 text-white disabled:opacity-50'
                 }`}
+                data-testid="captain-button-swap"
               >
                 {swapMode ? 'Cancel Swap' : 'Swap'}
               </button>
@@ -134,6 +139,7 @@ export function CaptainControls({
                   onClick={onProposeMatchmake}
                   disabled={proposingAction || hasPendingAction || players.length < 10}
                   className="bg-lol-blue/20 hover:bg-lol-blue/30 text-lol-blue px-4 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50"
+                  data-testid="captain-button-matchmake"
                 >
                   {proposingAction ? 'Proposing...' : 'Propose Matchmake'}
                 </button>
@@ -145,6 +151,7 @@ export function CaptainControls({
                   onClick={onProposeStartDraft}
                   disabled={proposingAction || hasPendingAction}
                   className="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50"
+                  data-testid="captain-button-start-draft"
                 >
                   {proposingAction ? 'Proposing...' : 'Propose Start Draft'}
                 </button>
@@ -156,7 +163,7 @@ export function CaptainControls({
 
       {/* Promote Modal */}
       {showPromoteModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" data-testid="captain-modal-promote">
           <div className="bg-gray-900 border border-gray-700 rounded-lg p-6 max-w-md w-full mx-4">
             <h3 className="text-lg font-semibold text-white mb-4">Promote Captain</h3>
             <p className="text-gray-400 text-sm mb-4">Select a teammate to become captain:</p>
@@ -189,7 +196,7 @@ export function CaptainControls({
 
       {/* Kick Modal */}
       {showKickModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" data-testid="captain-modal-kick">
           <div className="bg-gray-900 border border-gray-700 rounded-lg p-6 max-w-md w-full mx-4">
             <h3 className="text-lg font-semibold text-white mb-4">Kick Player</h3>
             <p className="text-gray-400 text-sm mb-4">Select a teammate to kick from the lobby:</p>

@@ -32,7 +32,9 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
 
   if (!response.ok) {
     // Handle expired/invalid token - redirect to login
-    if (response.status === 401) {
+    // But don't redirect for auth endpoints (login/register) - let them show error
+    const isAuthEndpoint = endpoint.startsWith('/auth/login') || endpoint.startsWith('/auth/register')
+    if (response.status === 401 && !isAuthEndpoint) {
       localStorage.removeItem('accessToken')
       localStorage.removeItem('refreshToken')
       window.location.href = '/login'

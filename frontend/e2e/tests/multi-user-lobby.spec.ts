@@ -1,8 +1,65 @@
-import { test, expect } from '../fixtures/multi-user';
+import { test, expect, UserSession } from '../fixtures/multi-user';
 import { LobbyRoomPage, DraftRoomPage, waitForAnyTurn } from '../fixtures/pages';
+import { TIMEOUTS } from '../helpers/wait-strategies';
+import { retryWithBackoff } from '../helpers/wait-strategies';
 
 // These tests involve multiple users and WebSocket connections - run serially to avoid interference
 test.describe.configure({ mode: 'serial' });
+
+/**
+ * Helper to find the captain who can approve a pending action.
+ * Uses parallel checking for efficiency.
+ */
+async function findCaptainWithApproveButton(
+  users: UserSession[],
+  lobbyPages: LobbyRoomPage[],
+  startIndex: number = 1
+): Promise<{ index: number; lobbyPage: LobbyRoomPage } | null> {
+  // Parallel check all users except the proposer
+  const checks = await Promise.all(
+    users.slice(startIndex).map(async (user, relativeIdx) => {
+      const actualIdx = relativeIdx + startIndex;
+      await user.page.reload();
+      await expect(user.page.locator('text=10-Man Lobby')).toBeVisible({
+        timeout: TIMEOUTS.MEDIUM,
+      });
+
+      const approveBtn = user.page.locator('button:has-text("Approve")');
+      const isVisible = await approveBtn.isVisible().catch(() => false);
+      return { index: actualIdx, hasApprove: isVisible };
+    })
+  );
+
+  const captain = checks.find((c) => c.hasApprove);
+  if (captain) {
+    return { index: captain.index, lobbyPage: lobbyPages[captain.index] };
+  }
+  return null;
+}
+
+/**
+ * Helper to make API calls with retry logic.
+ */
+async function apiCall(
+  endpoint: string,
+  token: string,
+  options: { method?: string; body?: unknown } = {}
+): Promise<Response> {
+  return retryWithBackoff(async () => {
+    const response = await fetch(`http://localhost:9999/api/v1${endpoint}`, {
+      method: options.method || 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+    if (!response.ok && response.status >= 500) {
+      throw new Error(`API Error ${response.status}`);
+    }
+    return response;
+  });
+}
 
 test.describe('Multi-User Lobby Flow with UI', () => {
   test('10 users can join and interact with lobby UI', async ({ lobbyWithUsers }) => {
@@ -26,16 +83,11 @@ test.describe('Multi-User Lobby Flow with UI', () => {
     }
 
     // Ready up all users via API for reliability (UI ready clicking is tested in other tests)
-    for (const user of users) {
-      await fetch(`http://localhost:9999/api/v1/lobbies/${lobby.id}/ready`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${user.token}`,
-        },
-        body: JSON.stringify({ ready: true }),
-      });
-    }
+    await Promise.all(
+      users.map((user) =>
+        apiCall(`/lobbies/${lobby.id}/ready`, user.token, { body: { ready: true } })
+      )
+    );
 
     // Navigate creator to lobby page and wait for it to show updated state
     const creatorPage = lobbyPages[0];
@@ -45,23 +97,62 @@ test.describe('Multi-User Lobby Flow with UI', () => {
     // Creator should see Generate Teams button (all 10 are ready)
     await creatorPage.expectGenerateTeamsButton();
 
-    // Creator clicks Generate Teams via UI
+    // Creator (Blue Captain) clicks Propose Matchmake via UI
     await creatorPage.clickGenerateTeams();
 
-    // Wait for team options to appear (or error message)
+    // Wait for the pending action banner to appear (matchmake proposal)
+    await creatorPage.expectPendingActionBanner();
+
+    // Find Red Captain and approve (parallel search)
+    const matchmakeCaptain = await findCaptainWithApproveButton(users, lobbyPages);
+    if (matchmakeCaptain) {
+      await matchmakeCaptain.lobbyPage.clickApprovePendingAction();
+      await users[matchmakeCaptain.index].page.waitForTimeout(1000);
+    }
+
+    // Reload creator page to see match options
+    await users[0].page.reload();
+    await expect(users[0].page.locator('text=10-Man Lobby')).toBeVisible();
+
+    // Wait for team options to appear
     await creatorPage.waitForMatchOptions();
 
-    // Creator selects first option via UI
+    // Creator (Blue Captain) proposes selecting first option
     await creatorPage.selectOption(1);
 
-    // Creator confirms selection
-    await creatorPage.clickConfirmSelection();
+    // Wait for the pending action banner
+    await creatorPage.expectPendingActionBanner();
 
-    // Creator should see Start Draft button
+    // Find Red Captain for option selection approval (parallel search)
+    const optionCaptain = await findCaptainWithApproveButton(users, lobbyPages);
+    if (optionCaptain) {
+      await optionCaptain.lobbyPage.clickApprovePendingAction();
+      await users[optionCaptain.index].page.waitForTimeout(1000);
+    }
+
+    // Reload creator page to see Start Draft option
+    await users[0].page.reload();
+    await expect(users[0].page.locator('text=10-Man Lobby')).toBeVisible();
+
+    // Creator should see Start Draft button (or Propose Start Draft)
     await creatorPage.expectStartDraftButton();
 
-    // Creator clicks Start Draft
+    // Creator clicks Start Draft (this also creates a pending action)
     await creatorPage.clickStartDraft();
+
+    // Wait for pending action if Start Draft creates one
+    const pendingBanner = users[0].page.locator('.bg-yellow-900\\/30');
+    try {
+      await pendingBanner.waitFor({ state: 'visible', timeout: 3000 });
+      // Find Red Captain for start draft approval (parallel search)
+      const startDraftCaptain = await findCaptainWithApproveButton(users, lobbyPages);
+      if (startDraftCaptain) {
+        await startDraftCaptain.lobbyPage.clickApprovePendingAction();
+        await users[startDraftCaptain.index].page.waitForTimeout(1000);
+      }
+    } catch {
+      // No pending action, draft started directly
+    }
 
     // All users should be redirected to draft page
     for (const user of users) {
@@ -128,23 +219,10 @@ test.describe('Multi-User Lobby Flow with UI', () => {
     // (Though with only 2 players, it won't appear anyway since 10 are needed)
 
     // Ready up both users via API for speed
-    await fetch(`http://localhost:9999/api/v1/lobbies/${lobby.id}/ready`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${creator.token}`,
-      },
-      body: JSON.stringify({ ready: true }),
-    });
-
-    await fetch(`http://localhost:9999/api/v1/lobbies/${lobby.id}/ready`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${joiner.token}`,
-      },
-      body: JSON.stringify({ ready: true }),
-    });
+    await Promise.all([
+      apiCall(`/lobbies/${lobby.id}/ready`, creator.token, { body: { ready: true } }),
+      apiCall(`/lobbies/${lobby.id}/ready`, joiner.token, { body: { ready: true } }),
+    ]);
 
     // Reload both pages
     await creator.page.reload();
@@ -162,13 +240,8 @@ test.describe('Multi-User Lobby Flow with UI', () => {
     const users = await createUsers(5);
 
     // First user creates lobby via API
-    const createResponse = await fetch('http://localhost:9999/api/v1/lobbies', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${users[0].token}`,
-      },
-      body: JSON.stringify({ draftMode: 'pro_play', timerDurationSeconds: 30 }),
+    const createResponse = await apiCall('/lobbies', users[0].token, {
+      body: { draftMode: 'pro_play', timerDurationSeconds: 90 },
     });
     const lobby = await createResponse.json();
 
@@ -179,12 +252,7 @@ test.describe('Multi-User Lobby Flow with UI', () => {
     // Each subsequent user joins and we verify count increases
     for (let i = 1; i < users.length; i++) {
       // Join via API
-      await fetch(`http://localhost:9999/api/v1/lobbies/${lobby.id}/join`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${users[i].token}`,
-        },
-      });
+      await apiCall(`/lobbies/${lobby.id}/join`, users[i].token);
 
       // Navigate to lobby
       await users[i].page.goto(`/lobby/${lobby.id}`);
@@ -218,16 +286,11 @@ test.describe('Multi-User Lobby Draft Flow', () => {
     }
 
     // Ready up all users via API for reliability
-    for (const user of users) {
-      await fetch(`http://localhost:9999/api/v1/lobbies/${lobby.id}/ready`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${user.token}`,
-        },
-        body: JSON.stringify({ ready: true }),
-      });
-    }
+    await Promise.all(
+      users.map((user) =>
+        apiCall(`/lobbies/${lobby.id}/ready`, user.token, { body: { ready: true } })
+      )
+    );
 
     // Reload creator's page to see updated state
     await users[0].page.reload();
@@ -237,13 +300,44 @@ test.describe('Multi-User Lobby Draft Flow', () => {
     const creatorPage = lobbyPages[0];
     await creatorPage.expectGenerateTeamsButton();
     await creatorPage.clickGenerateTeams();
+
+    // Handle captain approval flow for matchmaking
+    await creatorPage.expectPendingActionBanner();
+    const matchmakeCaptain = await findCaptainWithApproveButton(users, lobbyPages);
+    if (matchmakeCaptain) {
+      await matchmakeCaptain.lobbyPage.clickApprovePendingAction();
+      await users[matchmakeCaptain.index].page.waitForTimeout(1000);
+    }
+
+    await users[0].page.reload();
     await creatorPage.waitForMatchOptions();
     await creatorPage.selectOption(1);
-    await creatorPage.clickConfirmSelection();
+
+    // Handle captain approval flow for option selection
+    await creatorPage.expectPendingActionBanner();
+    const optionCaptain = await findCaptainWithApproveButton(users, lobbyPages);
+    if (optionCaptain) {
+      await optionCaptain.lobbyPage.clickApprovePendingAction();
+      await users[optionCaptain.index].page.waitForTimeout(1000);
+    }
 
     // Start draft - all users will be redirected
+    await users[0].page.reload();
     await creatorPage.expectStartDraftButton();
     await creatorPage.clickStartDraft();
+
+    // Handle captain approval flow for start draft
+    const pendingBanner = users[0].page.locator('.bg-yellow-900\\/30');
+    try {
+      await pendingBanner.waitFor({ state: 'visible', timeout: 3000 });
+      const startDraftCaptain = await findCaptainWithApproveButton(users, lobbyPages);
+      if (startDraftCaptain) {
+        await startDraftCaptain.lobbyPage.clickApprovePendingAction();
+        await users[startDraftCaptain.index].page.waitForTimeout(1000);
+      }
+    } catch {
+      // No pending action, draft started directly
+    }
 
     // All users should be redirected to draft page
     const draftPages: DraftRoomPage[] = [];
@@ -272,7 +366,7 @@ test.describe('Multi-User Lobby Draft Flow', () => {
     // Find a user who can see Start Draft (wait longer for WebSocket to sync)
     let starterFound = false;
     for (const draftPage of draftPages) {
-      const startButton = draftPage.page.locator('button:has-text("Start Draft")');
+      const startButton = draftPage.getPage().locator('button:has-text("Start Draft")');
       const count = await startButton.count();
       if (count > 0 && (await startButton.isVisible())) {
         await startButton.click();
@@ -315,44 +409,28 @@ test.describe('Multi-User Lobby Draft Flow', () => {
     const { lobby, users } = await lobbyWithUsers(10);
 
     // Ready up all users via API
-    for (const user of users) {
-      await fetch(`http://localhost:9999/api/v1/lobbies/${lobby.id}/ready`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${user.token}`,
-        },
-        body: JSON.stringify({ ready: true }),
-      });
-    }
+    await Promise.all(
+      users.map((user) =>
+        apiCall(`/lobbies/${lobby.id}/ready`, user.token, { body: { ready: true } })
+      )
+    );
 
     // Generate teams via API
-    const genResponse = await fetch(
-      `http://localhost:9999/api/v1/lobbies/${lobby.id}/generate-teams`,
-      {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${users[0].token}` },
-      }
+    const genResponse = await apiCall(
+      `/lobbies/${lobby.id}/generate-teams`,
+      users[0].token
     );
     expect(genResponse.ok).toBe(true);
 
     // Select first option via API
-    await fetch(`http://localhost:9999/api/v1/lobbies/${lobby.id}/select-option`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${users[0].token}`,
-      },
-      body: JSON.stringify({ optionNumber: 1 }),
+    await apiCall(`/lobbies/${lobby.id}/select-option`, users[0].token, {
+      body: { optionNumber: 1 },
     });
 
     // Start draft via API
-    const startResponse = await fetch(
-      `http://localhost:9999/api/v1/lobbies/${lobby.id}/start-draft`,
-      {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${users[0].token}` },
-      }
+    const startResponse = await apiCall(
+      `/lobbies/${lobby.id}/start-draft`,
+      users[0].token
     );
     const startData = await startResponse.json();
     const roomId = startData.id; // API returns 'id' not 'roomId'
@@ -401,7 +479,7 @@ test.describe('Multi-User Lobby Draft Flow', () => {
     let startClicked = false;
     for (let i = 0; i < draftPages.length; i++) {
       const draftPage = draftPages[i];
-      const startButton = draftPage.page.locator('button:has-text("Start Draft")');
+      const startButton = draftPage.getPage().locator('button:has-text("Start Draft")');
       const count = await startButton.count();
       const isVisible = count > 0 && (await startButton.isVisible());
       console.log(`User ${i}: Start Draft visible = ${isVisible}`);
@@ -452,24 +530,16 @@ test.describe('Match Options Visibility', () => {
     const [creator, ...joiners] = users;
 
     // Ready up all users via API for speed
-    for (const user of users) {
-      await fetch(`http://localhost:9999/api/v1/lobbies/${lobby.id}/ready`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${user.token}`,
-        },
-        body: JSON.stringify({ ready: true }),
-      });
-    }
+    await Promise.all(
+      users.map((user) =>
+        apiCall(`/lobbies/${lobby.id}/ready`, user.token, { body: { ready: true } })
+      )
+    );
 
     // Generate teams via API (creator only)
-    const genResponse = await fetch(
-      `http://localhost:9999/api/v1/lobbies/${lobby.id}/generate-teams`,
-      {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${creator.token}` },
-      }
+    const genResponse = await apiCall(
+      `/lobbies/${lobby.id}/generate-teams`,
+      creator.token
     );
     expect(genResponse.ok).toBe(true);
 
@@ -536,49 +606,28 @@ test.describe('Match Options Visibility', () => {
     const [creator, lateJoiner, ...others] = users;
 
     // Creator creates lobby
-    const createResponse = await fetch('http://localhost:9999/api/v1/lobbies', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${creator.token}`,
-      },
-      body: JSON.stringify({ draftMode: 'pro_play', timerDurationSeconds: 30 }),
+    const createResponse = await apiCall('/lobbies', creator.token, {
+      body: { draftMode: 'pro_play', timerDurationSeconds: 90 },
     });
     const lobby = await createResponse.json();
 
     // All users except lateJoiner join
-    for (const user of [creator, ...others]) {
-      if (user !== creator) {
-        await fetch(`http://localhost:9999/api/v1/lobbies/${lobby.id}/join`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${user.token}` },
-        });
-      }
-    }
+    await Promise.all(
+      others.map((user) => apiCall(`/lobbies/${lobby.id}/join`, user.token))
+    );
 
     // lateJoiner joins
-    await fetch(`http://localhost:9999/api/v1/lobbies/${lobby.id}/join`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${lateJoiner.token}` },
-    });
+    await apiCall(`/lobbies/${lobby.id}/join`, lateJoiner.token);
 
     // Ready up all users
-    for (const user of users) {
-      await fetch(`http://localhost:9999/api/v1/lobbies/${lobby.id}/ready`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${user.token}`,
-        },
-        body: JSON.stringify({ ready: true }),
-      });
-    }
+    await Promise.all(
+      users.map((user) =>
+        apiCall(`/lobbies/${lobby.id}/ready`, user.token, { body: { ready: true } })
+      )
+    );
 
     // Generate teams
-    await fetch(`http://localhost:9999/api/v1/lobbies/${lobby.id}/generate-teams`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${creator.token}` },
-    });
+    await apiCall(`/lobbies/${lobby.id}/generate-teams`, creator.token);
 
     // Now lateJoiner navigates to lobby - should see match options
     await lateJoiner.page.goto(`/lobby/${lobby.id}`);

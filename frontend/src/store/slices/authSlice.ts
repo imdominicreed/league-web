@@ -2,6 +2,8 @@ import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit'
 import { authApi } from '@/api/auth'
 import { User } from '@/types'
 
+// Fix: Use rejectWithValue to properly propagate error messages to Redux state
+
 interface AuthState {
   user: User | null
   accessToken: string | null
@@ -20,21 +22,29 @@ const initialState: AuthState = {
 
 export const login = createAsyncThunk(
   'auth/login',
-  async ({ displayName, password }: { displayName: string; password: string }) => {
-    const response = await authApi.login(displayName, password)
-    localStorage.setItem('accessToken', response.accessToken)
-    localStorage.setItem('refreshToken', response.refreshToken)
-    return response
+  async ({ displayName, password }: { displayName: string; password: string }, { rejectWithValue }) => {
+    try {
+      const response = await authApi.login(displayName, password)
+      localStorage.setItem('accessToken', response.accessToken)
+      localStorage.setItem('refreshToken', response.refreshToken)
+      return response
+    } catch (error) {
+      return rejectWithValue(error instanceof Error ? error.message : 'Login failed')
+    }
   }
 )
 
 export const register = createAsyncThunk(
   'auth/register',
-  async ({ displayName, password }: { displayName: string; password: string }) => {
-    const response = await authApi.register(displayName, password)
-    localStorage.setItem('accessToken', response.accessToken)
-    localStorage.setItem('refreshToken', response.refreshToken)
-    return response
+  async ({ displayName, password }: { displayName: string; password: string }, { rejectWithValue }) => {
+    try {
+      const response = await authApi.register(displayName, password)
+      localStorage.setItem('accessToken', response.accessToken)
+      localStorage.setItem('refreshToken', response.refreshToken)
+      return response
+    } catch (error) {
+      return rejectWithValue(error instanceof Error ? error.message : 'Registration failed')
+    }
   }
 )
 
@@ -76,7 +86,7 @@ const authSlice = createSlice({
       })
       .addCase(login.rejected, (state, action) => {
         state.loading = false
-        state.error = action.error.message || 'Login failed'
+        state.error = (action.payload as string) || 'Login failed'
       })
       .addCase(register.pending, (state) => {
         state.loading = true
@@ -90,7 +100,7 @@ const authSlice = createSlice({
       })
       .addCase(register.rejected, (state, action) => {
         state.loading = false
-        state.error = action.error.message || 'Registration failed'
+        state.error = (action.payload as string) || 'Registration failed'
       })
       .addCase(fetchCurrentUser.fulfilled, (state, action) => {
         state.user = action.payload

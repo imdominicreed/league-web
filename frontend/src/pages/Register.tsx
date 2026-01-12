@@ -28,7 +28,7 @@ export default function Register() {
 
         <form onSubmit={handleSubmit} className="space-y-6">
           {error && (
-            <div className="bg-red-500/20 border border-red-500 text-red-300 px-4 py-2 rounded">
+            <div className="bg-red-500/20 border border-red-500 text-red-300 px-4 py-2 rounded" data-testid="register-error-message">
               {error}
             </div>
           )}
@@ -44,6 +44,7 @@ export default function Register() {
               onChange={(e) => setDisplayName(e.target.value)}
               className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-lol-blue"
               required
+              data-testid="register-input-username"
             />
           </div>
 
@@ -58,6 +59,7 @@ export default function Register() {
               onChange={(e) => setPassword(e.target.value)}
               className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-lol-blue"
               required
+              data-testid="register-input-password"
             />
           </div>
 
@@ -65,6 +67,7 @@ export default function Register() {
             type="submit"
             disabled={loading}
             className="w-full bg-lol-blue text-black font-semibold py-3 px-6 rounded-lg hover:bg-opacity-80 transition disabled:opacity-50"
+            data-testid="register-button-submit"
           >
             {loading ? 'Creating account...' : 'Register'}
           </button>

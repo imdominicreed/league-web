@@ -94,6 +94,7 @@ export default function TeamPanel({ side, player, picks, isActive, hoveredChampi
         } ${isCaptainRow ? 'ring-1 ring-inset ring-lol-gold/50' : ''} ${
           isEditing ? 'ring-2 ring-inset ring-green-500' : ''
         } ${isClickable ? 'cursor-pointer hover:brightness-110' : ''}`}
+        data-testid={`draft-pick-slot-${side}-${slotIndex}`}
       >
         {/* Role and Player Info overlay */}
         {role && (
@@ -165,7 +166,7 @@ export default function TeamPanel({ side, player, picks, isActive, hoveredChampi
   return (
     <div className={`w-56 bg-lol-dark-blue flex flex-col border-l border-r border-lol-border pb-4 ${
       isActive ? borderColor : ''
-    }`}>
+    }`} data-testid={`draft-team-panel-${side}`}>
       {/* Team Header */}
       <div className={`px-2 py-1.5 border-b border-lol-border bg-${teamColor}/10`}>
         <div className={`font-beaufort text-${teamColor} text-xs uppercase tracking-wider`}>

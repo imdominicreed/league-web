@@ -223,12 +223,12 @@ export default function LobbyRoom() {
           <div>
             <h1 className="text-3xl font-bold text-lol-gold">10-Man Lobby</h1>
             <p className="text-gray-400">
-              Code: <span className="text-white font-mono">{lobby.shortCode}</span>
+              Code: <span className="text-white font-mono" data-testid="lobby-code-display">{lobby.shortCode}</span>
               <span className="mx-2">|</span>
-              Status: <span className="text-lol-blue capitalize">{lobby.status.replace(/_/g, ' ')}</span>
+              Status: <span className="text-lol-blue capitalize" data-testid="lobby-status-display">{lobby.status.replace(/_/g, ' ')}</span>
             </p>
           </div>
-          <Link to="/" className="text-gray-400 hover:text-white">&larr; Leave</Link>
+          <Link to="/" className="text-gray-400 hover:text-white" data-testid="lobby-link-leave">&larr; Leave</Link>
         </div>
 
         {/* Error Display */}
@@ -370,6 +370,7 @@ export default function LobbyRoom() {
                   onClick={handleStartDraft}
                   disabled={startingDraft}
                   className="bg-green-600 text-white font-semibold py-3 px-8 rounded-lg hover:bg-green-500 transition disabled:opacity-50"
+                  data-testid="lobby-button-start-draft"
                 >
                   {startingDraft ? 'Starting Draft...' : 'Start Draft'}
                 </button>
@@ -379,7 +380,7 @@ export default function LobbyRoom() {
         )}
 
         {/* Player Count */}
-        <div className="text-center text-gray-400 mt-6">
+        <div className="text-center text-gray-400 mt-6" data-testid="lobby-player-count">
           {lobby.players.length}/10 players
           {lobby.players.length > 0 && (
             <span className="ml-2">

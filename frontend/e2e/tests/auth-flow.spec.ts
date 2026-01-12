@@ -1,11 +1,6 @@
 import { test, expect } from '@playwright/test';
-import {
-  HomePage,
-  LoginPage,
-  RegisterPage,
-  generateTestUsername,
-  registerUserViaApi,
-} from '../fixtures/pages';
+import { HomePage, LoginPage, RegisterPage } from '../page-objects';
+import { generateTestUsername, registerUserViaApi } from '../fixtures';
 
 test.describe('Authentication Flow', () => {
   test('user can register through the UI', async ({ page }) => {

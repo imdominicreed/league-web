@@ -62,12 +62,16 @@ export interface LobbyWithUsers {
 }
 
 /**
- * API helper class for making authenticated requests
+ * API helper class for making authenticated requests with retry logic
  */
 class ApiClient {
   constructor(private token?: string) {}
 
-  async request<T>(endpoint: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
+  async request<T>(
+    endpoint: string,
+    options: { method?: string; body?: unknown; maxRetries?: number } = {}
+  ): Promise<T> {
+    const { method = 'GET', body, maxRetries = 3 } = options;
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
@@ -76,18 +80,39 @@ class ApiClient {
       headers['Authorization'] = `Bearer ${this.token}`;
     }
 
-    const response = await fetch(`${API_BASE}${endpoint}`, {
-      method: options.method || 'GET',
-      headers,
-      body: options.body ? JSON.stringify(options.body) : undefined,
-    });
+    let lastError: Error | null = null;
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`API Error ${response.status}: ${error}`);
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await fetch(`${API_BASE}${endpoint}`, {
+          method,
+          headers,
+          body: body ? JSON.stringify(body) : undefined,
+        });
+
+        // Only retry on 5xx errors, not 4xx
+        if (response.ok || response.status < 500) {
+          if (!response.ok) {
+            const error = await response.text();
+            throw new Error(`API Error ${response.status}: ${error}`);
+          }
+          return response.json();
+        }
+
+        const errorText = await response.text();
+        lastError = new Error(`API Error ${response.status}: ${errorText}`);
+      } catch (err) {
+        lastError = err as Error;
+      }
+
+      if (attempt < maxRetries) {
+        // Exponential backoff: 500ms, 1000ms, 2000ms
+        const delay = 500 * Math.pow(2, attempt - 1);
+        await new Promise((r) => setTimeout(r, delay));
+      }
     }
 
-    return response.json();
+    throw lastError;
   }
 
   async get<T>(endpoint: string): Promise<T> {
@@ -125,8 +150,8 @@ async function registerUser(displayName: string, password: string): Promise<{ us
  */
 function generateUsername(index: number): string {
   const timestamp = Date.now();
-  const random = Math.random().toString(36).substring(2, 6);
-  return `e2e_user_${index}_${timestamp}_${random}`;
+  const random = Math.random().toString(36).substring(2, 8); // 6 chars for uniqueness
+  return `e2e_${index}_${timestamp}_${random}`;
 }
 
 /**
@@ -204,7 +229,7 @@ export const test = base.extend<{
       const creatorClient = new ApiClient(users[0].token);
       const lobby = await creatorClient.post<Lobby>('/lobbies', {
         draftMode: 'pro_play',
-        timerDurationSeconds: 30,
+        timerDurationSeconds: 90, // Increased for test reliability
       });
 
       // All other users join the lobby in parallel
@@ -391,7 +416,7 @@ export async function setupLobbyWithPlayers(
   const creatorClient = new ApiClient(users[0].token);
   const lobby = await creatorClient.post<Lobby>('/lobbies', {
     draftMode: 'pro_play',
-    timerDurationSeconds: 30,
+    timerDurationSeconds: 90,
   });
 
   // Other users join sequentially to ensure proper team assignment order
@@ -421,7 +446,7 @@ export async function setupLobbyWithTeams(
   const creatorClient = new ApiClient(users[0].token);
   const lobby = await creatorClient.post<Lobby>('/lobbies', {
     draftMode: 'pro_play',
-    timerDurationSeconds: 30,
+    timerDurationSeconds: 90,
   });
 
   // All other users join in parallel

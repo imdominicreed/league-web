@@ -175,6 +175,7 @@ export default function ChampionGrid({ onSelect, onLockIn, onHover, onProposeEdi
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           className="w-48 px-3 py-1.5 bg-lol-gray border border-lol-border rounded text-sm text-white placeholder-gray-500 focus:outline-none focus:border-lol-gold transition"
+          data-testid="draft-champion-search"
         />
 
         {/* Role filters */}
@@ -249,6 +250,7 @@ export default function ChampionGrid({ onSelect, onLockIn, onHover, onProposeEdi
               ? 'bg-lol-gold text-lol-dark hover:brightness-110 shadow-[0_0_15px_rgba(200,170,110,0.3)]'
               : 'bg-lol-gray border border-lol-border text-gray-500 cursor-not-allowed'
           }`}
+          data-testid="draft-button-lock-in"
         >
           Lock In
         </button>

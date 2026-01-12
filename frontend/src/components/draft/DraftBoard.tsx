@@ -45,7 +45,7 @@ export default function DraftBoard({ ws }: Props) {
       {/* Top Bar with Room Code, Pause Controls, and Connection Status */}
       <header className="bg-lol-dark-blue/80 border-b border-lol-border px-3 py-1 flex items-center justify-between">
         <div className="text-xs text-lol-gold-light">
-          Room: <span className="font-mono text-lol-gold">{room.shortCode}</span>
+          Room: <span className="font-mono text-lol-gold" data-testid="draft-room-code">{room.shortCode}</span>
         </div>
 
         {/* Center: Timer and Pause Controls */}
@@ -63,7 +63,7 @@ export default function DraftBoard({ ws }: Props) {
 
         <div className="flex items-center gap-2">
           {!ws.isConnected && (
-            <span className="text-red-team text-xs">Disconnected</span>
+            <span className="text-red-team text-xs" data-testid="draft-disconnected">Disconnected</span>
           )}
         </div>
       </header>
@@ -147,6 +147,7 @@ export default function DraftBoard({ ws }: Props) {
                   <button
                     onClick={() => ws.setReady(true)}
                     className="bg-lol-blue-accent text-lol-dark font-beaufort font-bold py-2 px-6 rounded text-sm uppercase tracking-wider hover:brightness-110 transition"
+                    data-testid="draft-button-ready"
                   >
                     Ready
                   </button>
@@ -157,6 +158,7 @@ export default function DraftBoard({ ws }: Props) {
                 <button
                   onClick={() => ws.startDraft()}
                   className="mt-3 bg-lol-gold text-lol-dark font-beaufort font-bold py-2 px-6 rounded text-sm uppercase tracking-wider hover:brightness-110 transition"
+                  data-testid="draft-button-start"
                 >
                   Start Draft
                 </button>

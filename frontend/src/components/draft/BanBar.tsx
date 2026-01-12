@@ -60,6 +60,7 @@ export default function BanBar({ blueBans, redBans, isBlueActive, isRedActive }:
               ? 'border-lol-border'
               : 'border-lol-gray'
           } ${isClickable ? 'cursor-pointer hover:brightness-110' : ''} bg-lol-dark-blue`}
+          data-testid={`draft-ban-slot-${side}-${index}`}
         >
           {champion ? (
             <>
@@ -118,7 +119,7 @@ export default function BanBar({ blueBans, redBans, isBlueActive, isRedActive }:
               Waiting
             </div>
           ) : isComplete ? (
-            <div className="font-beaufort text-lol-gold text-lg uppercase tracking-wider">
+            <div className="font-beaufort text-lol-gold text-lg uppercase tracking-wider" data-testid="draft-status-complete">
               Complete
             </div>
           ) : (
@@ -132,12 +133,13 @@ export default function BanBar({ blueBans, redBans, isBlueActive, isRedActive }:
                 className={`font-beaufort text-3xl font-bold ${
                   isCritical ? 'text-red-team animate-pulse' : isLow ? 'text-yellow-500' : 'text-lol-gold'
                 }`}
+                data-testid="draft-timer-value"
               >
                 {seconds}
               </div>
               <div className={`text-sm uppercase tracking-wider font-semibold ${
                 currentTeam === 'blue' ? 'text-blue-team' : 'text-red-team'
-              }`}>
+              }`} data-testid="draft-current-team">
                 {currentTeam === 'blue' ? 'Blue' : 'Red'} Team
               </div>
             </>
