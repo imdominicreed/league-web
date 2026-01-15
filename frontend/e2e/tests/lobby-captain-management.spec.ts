@@ -14,6 +14,11 @@ import {
   UserSession,
   LobbyPlayer,
 } from '../fixtures/multi-user';
+import { TIMEOUTS } from '../helpers/wait-strategies';
+import {
+  waitForPendingActionBanner,
+  waitForCaptainStatus,
+} from '../helpers/websocket-sync';
 
 /**
  * Lobby Captain Management E2E Tests
@@ -73,10 +78,8 @@ test.describe('Take Captain Tests', () => {
     // Click Take Captain
     await lobbyPage.clickTakeCaptain();
 
-    // Wait for state update and reload
-    await nonCaptainUser!.page.waitForTimeout(1000);
-    await nonCaptainUser!.page.reload();
-    await expect(nonCaptainUser!.page.locator('text=10-Man Lobby')).toBeVisible({ timeout: 10000 });
+    // Wait for captain status to update via polling (no reload needed)
+    await waitForCaptainStatus(nonCaptainUser!.page, true, { timeout: TIMEOUTS.MEDIUM });
 
     // Verify: Should now see Captain Controls
     await lobbyPage.expectCaptainControls();
@@ -109,10 +112,8 @@ test.describe('Take Captain Tests', () => {
     // Take captain
     await lobbyPage.clickTakeCaptain();
 
-    // Wait for state update and reload
-    await nonCaptainUser!.page.waitForTimeout(1000);
-    await nonCaptainUser!.page.reload();
-    await expect(nonCaptainUser!.page.locator('text=10-Man Lobby')).toBeVisible({ timeout: 10000 });
+    // Wait for captain status to update via polling (no reload needed)
+    await waitForCaptainStatus(nonCaptainUser!.page, true, { timeout: TIMEOUTS.MEDIUM });
 
     // After: Should see "Captain Controls"
     await lobbyPage.expectCaptainControls();
@@ -160,10 +161,8 @@ test.describe('Promote Captain Tests', () => {
     // Select teammate
     await lobbyPage.selectPlayerInModal(teammate!.displayName);
 
-    // Wait for state update and reload to see changes
-    await blueCaptainUser!.page.waitForTimeout(1000);
-    await blueCaptainUser!.page.reload();
-    await expect(blueCaptainUser!.page.locator('text=10-Man Lobby')).toBeVisible({ timeout: 10000 });
+    // Wait for captain status to change via polling (no reload needed)
+    await waitForCaptainStatus(blueCaptainUser!.page, false, { timeout: TIMEOUTS.MEDIUM });
 
     // Verify: Original captain no longer has captain controls
     await lobbyPage.expectPlayerActions();
@@ -245,13 +244,8 @@ test.describe('Promote Captain Tests', () => {
     await captainPage.clickPromoteCaptain();
     await captainPage.selectPlayerInModal(teammate!.displayName);
 
-    // Wait for state update
-    await blueCaptainUser!.page.waitForTimeout(1000);
-
-    // Reload promoted user's page to see updated state
-    await teammateUser!.page.reload();
-
-    await expect(teammateUser!.page.locator('text=10-Man Lobby')).toBeVisible({ timeout: 10000 });
+    // Wait for captain status to update on promoted user's page via polling (no reload needed)
+    await waitForCaptainStatus(teammateUser!.page, true, { timeout: TIMEOUTS.MEDIUM });
 
     // New captain should see Captain Controls
     await teammatePage.expectCaptainControls();
@@ -360,18 +354,34 @@ test.describe('Kick Player Tests', () => {
     // Kick teammate via API for reliability
     await kickPlayer(blueCaptainUser!, lobby.id, teammate!.userId);
 
-    // Reload captain's page
-    await blueCaptainUser!.page.reload();
-    await expect(blueCaptainUser!.page.locator('text=10-Man Lobby')).toBeVisible({ timeout: 10000 });
+    // Wait for kicked player to disappear via polling (no reload needed)
+    await expect
+      .poll(
+        async () => {
+          const playerName = blueCaptainUser!.page.locator(
+            `[data-testid^="team-column-"] [data-testid^="lobby-player-"]:has-text("${teammate!.displayName}")`
+          );
+          return (await playerName.count()) === 0;
+        },
+        { timeout: TIMEOUTS.MEDIUM }
+      )
+      .toBe(true);
 
     // Kicked player should not be visible
     await captainPage.expectPlayerNotInLobby(teammate!.displayName);
 
-    // Verify the kicked user session shows they're no longer in lobby
-    await teammateUser!.page.reload();
+    // Wait for kicked user's page to update via polling (no reload needed)
+    await expect
+      .poll(
+        async () => {
+          const captainControls = teammateUser!.page.locator('text=Captain Controls');
+          return (await captainControls.count()) === 0;
+        },
+        { timeout: TIMEOUTS.MEDIUM }
+      )
+      .toBe(true);
 
-    // They should either see an error or the controls should be different
-    // Check that they no longer see Captain Controls
+    // They should no longer see Captain Controls
     await expect(teammateUser!.page.locator('text=Captain Controls')).not.toBeVisible();
   });
 });
@@ -464,11 +474,8 @@ test.describe('Swap Player Tests (Between Teams)', () => {
     // Red captain approves
     await redLobbyPage.clickApprovePendingAction();
 
-    // Wait for state update
-    await redCaptainUser!.page.waitForTimeout(1000);
-
-    // Reload to see updated state
-    await redCaptainUser!.page.reload();
+    // Wait for pending action banner to disappear via polling (no reload needed)
+    await waitForPendingActionBanner(redCaptainUser!.page, { visible: false });
 
     // Verify swap occurred via API
     const updatedLobby = await getLobby(redCaptainUser!, lobby.id);
@@ -554,10 +561,10 @@ test.describe('Swap Player Tests (Between Teams)', () => {
     // Cancel the swap via UI
     await lobbyPage.clickCancelPendingAction();
 
-    // Wait for state update
-    await blueCaptainUser!.page.waitForTimeout(1000);
+    // Wait for pending action banner to disappear via polling (no reload needed)
+    await waitForPendingActionBanner(blueCaptainUser!.page, { visible: false });
 
-    // Banner should disappear
+    // Banner should be gone
     await lobbyPage.expectNoPendingActionBanner();
 
     // Verify via API

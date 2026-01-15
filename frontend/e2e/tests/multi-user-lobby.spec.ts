@@ -2,38 +2,49 @@ import { test, expect, UserSession } from '../fixtures/multi-user';
 import { LobbyRoomPage, DraftRoomPage, waitForAnyTurn } from '../fixtures/pages';
 import { TIMEOUTS } from '../helpers/wait-strategies';
 import { retryWithBackoff } from '../helpers/wait-strategies';
+import {
+  waitForPendingActionBanner,
+  waitForMatchOptionsLoaded,
+  waitForStartDraftButton,
+  hasApproveButton,
+} from '../helpers/websocket-sync';
 
 // These tests involve multiple users and WebSocket connections - run serially to avoid interference
 test.describe.configure({ mode: 'serial' });
 
 /**
  * Helper to find the captain who can approve a pending action.
- * Uses parallel checking for efficiency.
+ * Uses polling instead of page reloads for efficiency and reliability.
  */
 async function findCaptainWithApproveButton(
   users: UserSession[],
   lobbyPages: LobbyRoomPage[],
   startIndex: number = 1
 ): Promise<{ index: number; lobbyPage: LobbyRoomPage } | null> {
-  // Parallel check all users except the proposer
-  const checks = await Promise.all(
-    users.slice(startIndex).map(async (user, relativeIdx) => {
-      const actualIdx = relativeIdx + startIndex;
-      await user.page.reload();
-      await expect(user.page.locator('text=10-Man Lobby')).toBeVisible({
-        timeout: TIMEOUTS.MEDIUM,
-      });
+  // Poll all users (except the proposer) to find who has the approve button
+  // The approve button appears via polling (every 3s) when pending action exists
+  const timeout = TIMEOUTS.MEDIUM;
+  const startTime = Date.now();
 
-      const approveBtn = user.page.locator('button:has-text("Approve")');
-      const isVisible = await approveBtn.isVisible().catch(() => false);
-      return { index: actualIdx, hasApprove: isVisible };
-    })
-  );
+  while (Date.now() - startTime < timeout) {
+    // Check all pages in parallel (without reload)
+    const checks = await Promise.all(
+      users.slice(startIndex).map(async (user, relativeIdx) => {
+        const actualIdx = relativeIdx + startIndex;
+        const hasBtn = await hasApproveButton(user.page);
+        return { index: actualIdx, hasApprove: hasBtn };
+      })
+    );
 
-  const captain = checks.find((c) => c.hasApprove);
-  if (captain) {
-    return { index: captain.index, lobbyPage: lobbyPages[captain.index] };
+    const captain = checks.find((c) => c.hasApprove);
+    if (captain) {
+      return { index: captain.index, lobbyPage: lobbyPages[captain.index] };
+    }
+
+    // Wait a short interval before checking again (lobby polls every 3s)
+    await new Promise((resolve) => setTimeout(resolve, 500));
   }
+
   return null;
 }
 
@@ -89,10 +100,11 @@ test.describe('Multi-User Lobby Flow with UI', () => {
       )
     );
 
-    // Navigate creator to lobby page and wait for it to show updated state
+    // Wait for creator's page to show updated state (polls every 3s)
     const creatorPage = lobbyPages[0];
-    await users[0].page.reload();
-    await expect(users[0].page.locator('text=10-Man Lobby')).toBeVisible();
+    await expect(creatorPage.getPage().locator('[data-testid="captain-button-matchmake"]')).toBeVisible({
+      timeout: TIMEOUTS.MEDIUM,
+    });
 
     // Creator should see Generate Teams button (all 10 are ready)
     await creatorPage.expectGenerateTeamsButton();
@@ -103,16 +115,16 @@ test.describe('Multi-User Lobby Flow with UI', () => {
     // Wait for the pending action banner to appear (matchmake proposal)
     await creatorPage.expectPendingActionBanner();
 
-    // Find Red Captain and approve (parallel search)
+    // Find Red Captain and approve (using polling instead of reload)
     const matchmakeCaptain = await findCaptainWithApproveButton(users, lobbyPages);
     if (matchmakeCaptain) {
       await matchmakeCaptain.lobbyPage.clickApprovePendingAction();
-      await users[matchmakeCaptain.index].page.waitForTimeout(1000);
+      // Wait for pending action banner to disappear (indicates approval processed)
+      await waitForPendingActionBanner(matchmakeCaptain.lobbyPage.getPage(), { visible: false });
     }
 
-    // Reload creator page to see match options
-    await users[0].page.reload();
-    await expect(users[0].page.locator('text=10-Man Lobby')).toBeVisible();
+    // Wait for match options to load on creator's page (polls every 3s)
+    await waitForMatchOptionsLoaded(users[0].page);
 
     // Wait for team options to appear
     await creatorPage.waitForMatchOptions();
@@ -123,16 +135,16 @@ test.describe('Multi-User Lobby Flow with UI', () => {
     // Wait for the pending action banner
     await creatorPage.expectPendingActionBanner();
 
-    // Find Red Captain for option selection approval (parallel search)
+    // Find Red Captain for option selection approval (using polling)
     const optionCaptain = await findCaptainWithApproveButton(users, lobbyPages);
     if (optionCaptain) {
       await optionCaptain.lobbyPage.clickApprovePendingAction();
-      await users[optionCaptain.index].page.waitForTimeout(1000);
+      // Wait for pending action banner to disappear
+      await waitForPendingActionBanner(optionCaptain.lobbyPage.getPage(), { visible: false });
     }
 
-    // Reload creator page to see Start Draft option
-    await users[0].page.reload();
-    await expect(users[0].page.locator('text=10-Man Lobby')).toBeVisible();
+    // Wait for Start Draft button to appear on creator's page
+    await waitForStartDraftButton(users[0].page);
 
     // Creator should see Start Draft button (or Propose Start Draft)
     await creatorPage.expectStartDraftButton();
@@ -141,14 +153,15 @@ test.describe('Multi-User Lobby Flow with UI', () => {
     await creatorPage.clickStartDraft();
 
     // Wait for pending action if Start Draft creates one
-    const pendingBanner = users[0].page.locator('.bg-yellow-900\\/30');
+    const pendingBanner = users[0].page.locator('[data-testid="pending-action-banner"]');
     try {
       await pendingBanner.waitFor({ state: 'visible', timeout: 3000 });
-      // Find Red Captain for start draft approval (parallel search)
+      // Find Red Captain for start draft approval (using polling)
       const startDraftCaptain = await findCaptainWithApproveButton(users, lobbyPages);
       if (startDraftCaptain) {
         await startDraftCaptain.lobbyPage.clickApprovePendingAction();
-        await users[startDraftCaptain.index].page.waitForTimeout(1000);
+        // Wait for banner to disappear
+        await waitForPendingActionBanner(startDraftCaptain.lobbyPage.getPage(), { visible: false });
       }
     } catch {
       // No pending action, draft started directly
@@ -196,8 +209,20 @@ test.describe('Multi-User Lobby Flow with UI', () => {
     // Wait for button to change to Cancel Ready
     await expect(user1.page.locator('button:has-text("Cancel Ready")')).toBeVisible();
 
-    // Refresh user 2's page to see the update
-    await user2.page.reload();
+    // Wait for user 2 to see the update via polling (instead of reload)
+    await expect
+      .poll(
+        async () => {
+          // Check if user1's ready indicator is visible on user2's page
+          const playerCard = user2.page.locator(`[data-testid^="lobby-player-"]`).filter({
+            hasText: user1.user.displayName,
+          });
+          const readyDot = playerCard.locator('.bg-green-500');
+          return await readyDot.isVisible().catch(() => false);
+        },
+        { timeout: TIMEOUTS.MEDIUM }
+      )
+      .toBe(true);
 
     // User 1 should show Cancel Ready (they're ready)
     await expect(user1.page.locator('button:has-text("Cancel Ready")')).toBeVisible();
@@ -224,9 +249,13 @@ test.describe('Multi-User Lobby Flow with UI', () => {
       apiCall(`/lobbies/${lobby.id}/ready`, joiner.token, { body: { ready: true } }),
     ]);
 
-    // Reload both pages
-    await creator.page.reload();
-    await joiner.page.reload();
+    // Wait for state to update via polling (instead of reload)
+    await expect(creator.page.locator('button:has-text("Cancel Ready")')).toBeVisible({
+      timeout: TIMEOUTS.MEDIUM,
+    });
+    await expect(joiner.page.locator('button:has-text("Cancel Ready")')).toBeVisible({
+      timeout: TIMEOUTS.MEDIUM,
+    });
 
     // Since we need 10 players for Generate Teams, this test just verifies
     // that the joiner doesn't see controls they shouldn't see
@@ -257,9 +286,8 @@ test.describe('Multi-User Lobby Flow with UI', () => {
       // Navigate to lobby
       await users[i].page.goto(`/lobby/${lobby.id}`);
 
-      // Reload creator's page and verify updated count
-      await users[0].page.reload();
-      await expect(users[0].page.locator(`text=${i + 1}/10`)).toBeVisible({ timeout: 5000 });
+      // Wait for creator's page to show updated count via polling (instead of reload)
+      await expect(users[0].page.locator(`text=${i + 1}/10`)).toBeVisible({ timeout: TIMEOUTS.MEDIUM });
     }
   });
 });
@@ -292,13 +320,11 @@ test.describe('Multi-User Lobby Draft Flow', () => {
       )
     );
 
-    // Reload creator's page to see updated state
-    await users[0].page.reload();
-    await expect(users[0].page.locator('text=10-Man Lobby')).toBeVisible();
-
-    // Creator generates teams, selects option, and starts draft
+    // Wait for creator's page to show generate teams button
     const creatorPage = lobbyPages[0];
     await creatorPage.expectGenerateTeamsButton();
+
+    // Creator generates teams, selects option, and starts draft
     await creatorPage.clickGenerateTeams();
 
     // Handle captain approval flow for matchmaking
@@ -306,10 +332,11 @@ test.describe('Multi-User Lobby Draft Flow', () => {
     const matchmakeCaptain = await findCaptainWithApproveButton(users, lobbyPages);
     if (matchmakeCaptain) {
       await matchmakeCaptain.lobbyPage.clickApprovePendingAction();
-      await users[matchmakeCaptain.index].page.waitForTimeout(1000);
+      await waitForPendingActionBanner(matchmakeCaptain.lobbyPage.getPage(), { visible: false });
     }
 
-    await users[0].page.reload();
+    // Wait for match options to load
+    await waitForMatchOptionsLoaded(users[0].page);
     await creatorPage.waitForMatchOptions();
     await creatorPage.selectOption(1);
 
@@ -318,22 +345,22 @@ test.describe('Multi-User Lobby Draft Flow', () => {
     const optionCaptain = await findCaptainWithApproveButton(users, lobbyPages);
     if (optionCaptain) {
       await optionCaptain.lobbyPage.clickApprovePendingAction();
-      await users[optionCaptain.index].page.waitForTimeout(1000);
+      await waitForPendingActionBanner(optionCaptain.lobbyPage.getPage(), { visible: false });
     }
 
-    // Start draft - all users will be redirected
-    await users[0].page.reload();
+    // Start draft - wait for button to appear
+    await waitForStartDraftButton(users[0].page);
     await creatorPage.expectStartDraftButton();
     await creatorPage.clickStartDraft();
 
     // Handle captain approval flow for start draft
-    const pendingBanner = users[0].page.locator('.bg-yellow-900\\/30');
+    const pendingBanner = users[0].page.locator('[data-testid="pending-action-banner"]');
     try {
       await pendingBanner.waitFor({ state: 'visible', timeout: 3000 });
       const startDraftCaptain = await findCaptainWithApproveButton(users, lobbyPages);
       if (startDraftCaptain) {
         await startDraftCaptain.lobbyPage.clickApprovePendingAction();
-        await users[startDraftCaptain.index].page.waitForTimeout(1000);
+        await waitForPendingActionBanner(startDraftCaptain.lobbyPage.getPage(), { visible: false });
       }
     } catch {
       // No pending action, draft started directly
@@ -416,10 +443,7 @@ test.describe('Multi-User Lobby Draft Flow', () => {
     );
 
     // Generate teams via API
-    const genResponse = await apiCall(
-      `/lobbies/${lobby.id}/generate-teams`,
-      users[0].token
-    );
+    const genResponse = await apiCall(`/lobbies/${lobby.id}/generate-teams`, users[0].token);
     expect(genResponse.ok).toBe(true);
 
     // Select first option via API
@@ -428,10 +452,7 @@ test.describe('Multi-User Lobby Draft Flow', () => {
     });
 
     // Start draft via API
-    const startResponse = await apiCall(
-      `/lobbies/${lobby.id}/start-draft`,
-      users[0].token
-    );
+    const startResponse = await apiCall(`/lobbies/${lobby.id}/start-draft`, users[0].token);
     const startData = await startResponse.json();
     const roomId = startData.id; // API returns 'id' not 'roomId'
 
@@ -537,10 +558,7 @@ test.describe('Match Options Visibility', () => {
     );
 
     // Generate teams via API (creator only)
-    const genResponse = await apiCall(
-      `/lobbies/${lobby.id}/generate-teams`,
-      creator.token
-    );
+    const genResponse = await apiCall(`/lobbies/${lobby.id}/generate-teams`, creator.token);
     expect(genResponse.ok).toBe(true);
 
     // Navigate all users to the lobby page and wait for match options to load
@@ -552,7 +570,9 @@ test.describe('Match Options Visibility', () => {
 
     // All users should see "Select Team Composition" heading (wait longer for match options fetch)
     for (let i = 0; i < users.length; i++) {
-      await expect(users[i].page.locator('text=Select Team Composition')).toBeVisible({ timeout: 15000 });
+      await expect(users[i].page.locator('text=Select Team Composition')).toBeVisible({
+        timeout: 15000,
+      });
     }
 
     // All users should see match option cards (Option 1, Option 2, etc.)
@@ -580,14 +600,11 @@ test.describe('Match Options Visibility', () => {
     // Wait for selection to be confirmed
     await creatorPage.expectStartDraftButton();
 
-    // After selection, all users should see the selected option highlighted
+    // After selection, all users should see the selected option highlighted via polling
     for (const user of users) {
-      // Reload to get updated state
-      await user.page.reload();
-      await expect(user.page.locator('text=Select Team Composition')).toBeVisible({ timeout: 10000 });
-      // Option 1 should be visually selected (has gold border)
+      // Wait for state to update via polling instead of reload
       const option1 = user.page.locator('[data-testid="match-option-1"]');
-      await expect(option1).toHaveClass(/border-lol-gold/);
+      await expect(option1).toHaveClass(/border-lol-gold/, { timeout: TIMEOUTS.MEDIUM });
     }
 
     // Only creator should see "Start Draft" button
@@ -612,9 +629,7 @@ test.describe('Match Options Visibility', () => {
     const lobby = await createResponse.json();
 
     // All users except lateJoiner join
-    await Promise.all(
-      others.map((user) => apiCall(`/lobbies/${lobby.id}/join`, user.token))
-    );
+    await Promise.all(others.map((user) => apiCall(`/lobbies/${lobby.id}/join`, user.token)));
 
     // lateJoiner joins
     await apiCall(`/lobbies/${lobby.id}/join`, lateJoiner.token);
@@ -634,7 +649,9 @@ test.describe('Match Options Visibility', () => {
     await expect(lateJoiner.page.locator('text=10-Man Lobby')).toBeVisible();
 
     // Should see match options even though they joined after generation
-    await expect(lateJoiner.page.locator('text=Select Team Composition')).toBeVisible({ timeout: 10000 });
+    await expect(lateJoiner.page.locator('text=Select Team Composition')).toBeVisible({
+      timeout: 10000,
+    });
     await expect(lateJoiner.page.locator('[data-testid="match-option-1"]')).toBeVisible();
 
     // But should NOT see the confirm selection button (only creator can select)
@@ -657,8 +674,8 @@ test.describe('Multi-User Lobby Error Cases', () => {
       await expect(user.page.locator('button:has-text("Cancel Ready")')).toBeVisible();
     }
 
-    // Reload creator's page
-    await users[0].page.reload();
+    // Wait for state to update via polling
+    await expect(users[0].page.locator('text=5/10')).toBeVisible({ timeout: TIMEOUTS.MEDIUM });
 
     // Generate Teams button should NOT be visible with only 5 players
     await expect(users[0].page.locator('button:has-text("Generate Team Options")')).not.toBeVisible();

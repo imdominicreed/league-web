@@ -10,6 +10,7 @@
     "source=${localEnv:HOME}/.claude,target=/home/dev/.claude,type=bind",
     "source=${localEnv:HOME}/.ssh,target=/home/dev/.ssh,type=bind,readonly",
     "source=${localEnv:HOME}/.config/gh,target=/home/dev/.config/gh,type=bind,readonly",
+    "source=${localEnv:HOME}/.docker,target=/home/dev/.docker,type=bind,readonly",
     "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
   ],
 

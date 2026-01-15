@@ -23,6 +23,7 @@ services:
       - ${MAIN_GIT_DIR}:${MAIN_GIT_DIR}:cached
       - ${CHEZMOI_SOURCE:-~/.local/share/chezmoi}:/home/dev/.local/share/chezmoi:ro
       - ~/.claude:/home/dev/.claude
+      - ~/.claude.json:/home/dev/.claude.json
       - ~/.ssh:/home/dev/.ssh:ro
       - ~/.config/gh:/home/dev/.config/gh:ro
       - /var/run/docker.sock:/var/run/docker.sock
@@ -39,6 +40,7 @@ services:
       DEFAULT_TIMER_SECONDS: "30"
       TERM: xterm-256color
       COLORTERM: truecolor
+      CLAUDE_CONFIG_DIR: /home/dev/.claude
       PATH: "/home/dev/.local/bin:/home/dev/.local/share/fnm:/home/dev/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
     stdin_open: true
     tty: true
