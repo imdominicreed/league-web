@@ -2,20 +2,61 @@
 
 Real-time League of Legends Pro Play Pick/Ban drafting simulator with Go backend and React frontend.
 
+## Devcontainer Environment
+
+You are running inside a devcontainer with everything pre-configured.
+
+### Pre-Running Services
+
+| Service | Internal URL | External URL |
+|---------|--------------|--------------|
+| PostgreSQL | `db:5432` | N/A (container only) |
+| Backend | `localhost:9999` | `http://<project>.dev.local:9999` |
+| Frontend | `localhost:3000` | `http://<project>.dev.local:3000` |
+
+**Database is already running** - no need to start it manually. Connection string:
+```
+postgres://postgres:postgres@db:5432/league_draft
+```
+
+### Available Tools
+
+| Tool | Version | Notes |
+|------|---------|-------|
+| Go | 1.23+ | `go build`, `go test`, `go run` |
+| Node.js | 20+ | Via fnm, includes npm |
+| Docker | Host access | For testcontainers, via mounted socket |
+| Git | Latest | Full access to host repo |
+| Make | Latest | Project automation |
+| tmux | Latest | Session management |
+| Fish shell | Default | With starship prompt |
+
+### Working Directory
+
+```
+/workspaces/project/
+```
+
 ## Quick Reference
 
 ```bash
-# Start database
-make db
-
-# Start backend (port 9999)
+# Start backend (port 9999) - connects to already-running db
 make dev-backend
 
 # Start frontend (port 3000)
 cd frontend && npm run dev
 
+# Start both in tmux split
+make dev
+
 # Sync champion data from Riot
 make sync-champions
+
+# Run all backend tests (Docker available for testcontainers)
+go test ./...
+
+# Run frontend E2E tests (start backend first)
+cd frontend && npx playwright test
 ```
 
 ## Architecture
@@ -168,42 +209,52 @@ When a room is created from a lobby:
 
 ## Environment Variables
 
-### Backend (`.env` in project root)
+Environment is pre-configured in the devcontainer. A `.env` file exists at project root.
 
-Required:
-- `JWT_SECRET` - Secret key for JWT signing
-- `DATABASE_URL` - PostgreSQL connection string
+### Backend Variables
 
-Optional:
-- `PORT` - Server port (default: 9999)
-- `ENVIRONMENT` - Environment name (default: development)
-- `JWT_EXPIRATION_HOURS` - Token expiration (default: 24)
-- `DEFAULT_TIMER_SECONDS` - Draft timer (default: 30)
-- `DDRAGON_VERSION` - Lock to specific patch version (auto-fetches latest if empty)
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `DATABASE_URL` | `postgres://postgres:postgres@db:5432/league_draft` | PostgreSQL connection |
+| `JWT_SECRET` | (set in .env) | JWT signing key |
+| `PORT` | `9999` | Server port |
+| `ENVIRONMENT` | `development` | Environment name |
+| `JWT_EXPIRATION_HOURS` | `24` | Token expiration |
+| `DEFAULT_TIMER_SECONDS` | `30` | Draft timer |
+| `DDRAGON_VERSION` | (empty = latest) | Lock to specific patch |
 
-### Frontend (`frontend/.env`)
+### Frontend Variables (`frontend/.env`)
 
-- `VITE_API_URL` - Backend API URL for dev proxy (default: http://localhost:9999)
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `VITE_API_URL` | `http://localhost:9999` | Backend API URL |
 
 ## Testing
 
-### Running Tests
+### Backend Tests
+
+Docker is available via mounted socket - testcontainers work out of the box.
 
 ```bash
-# Backend (requires Docker for testcontainers)
 go test ./...                          # All tests
 go test ./... -v                       # Verbose
 go test ./... -race                    # Race detection
 go test ./... -short                   # Skip slow tests
-
-# Frontend E2E (requires backend running)
-cd frontend && npx playwright test     # All E2E tests
-cd frontend && npx playwright test --ui # Interactive mode
+go test ./internal/api/handlers/...   # Specific package
 ```
 
-### Backend Test Framework (`internal/testutil/`)
+### Frontend E2E Tests
 
-Uses **testcontainers-go** for real PostgreSQL instances. Docker must be running.
+Requires backend running on port 9999.
+
+```bash
+cd frontend
+npx playwright test                    # All E2E tests
+npx playwright test --ui               # Interactive mode
+npx playwright test lobby.spec.ts      # Specific test file
+```
+
+### Test Framework (`internal/testutil/`)
 
 | Component | Purpose |
 |-----------|---------|
@@ -238,16 +289,6 @@ Uses **Playwright** with page objects and multi-user fixtures.
 
 **API helpers**: `registerUserViaApi()`, `createLobbyViaApi()`, `joinLobbyViaApi()`, `setReadyViaApi()`, `generateTeams()`, `selectMatchOption()`
 
-## Recent Improvements
-
-- **Multi-Algorithm Matchmaking**: 4 specialized algorithms (MMR balanced, role comfort, hybrid, lane balanced) generate diverse team options
-- **Red Team Permutation Fix**: Now tries all 120×120 role permutations for both teams instead of only permuting blue
-- **Algorithm UI Badges**: Match options display algorithm type badge and key metrics (MMR diff, avg comfort, max lane gap)
-- **Request/Response Logging**: API client logs all requests with full URLs and response status
-- **WebSocket Error Logging**: Connection errors and message handling logged for debugging
-- **Auth Error Logging**: Authentication middleware logs all auth failures
-- **WSL Compatibility**: Backend port updated to 9999 for WSL environment
-
 ## Notes
 
 - Champion data synced from Riot Data Dragon CDN
@@ -255,3 +296,4 @@ Uses **Playwright** with page objects and multi-user fixtures.
 - Frontend uses path alias `@/` for `src/`
 - Authentication uses JWT tokens with configurable expiration
 - WebSocket auto-reconnects after 3 seconds on disconnect
+- Database migrations run automatically on backend startup
