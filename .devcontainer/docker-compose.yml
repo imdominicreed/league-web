@@ -42,6 +42,7 @@ services:
       PATH: "/home/dev/.local/bin:/home/dev/.local/share/fnm:/home/dev/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
     stdin_open: true
     tty: true
+    working_dir: /workspaces/project
     command: sleep infinity
     networks:
       - traefik-dev
