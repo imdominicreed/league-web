@@ -48,3 +48,7 @@ playwright-report/
 # Temporary
 tmp/
 temp/
+
+# Dev container
+.devcontainer/.setup-done
+.devcontainer/.env

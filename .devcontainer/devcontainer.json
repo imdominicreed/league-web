@@ -2,7 +2,7 @@
   "name": "League Draft Dev",
   "dockerComposeFile": "docker-compose.yml",
   "service": "dev",
-  "workspaceFolder": "/workspaces/league-draft-website",
+  "workspaceFolder": "/workspaces/project",
 
   "mounts": [
     "source=${localEnv:HOME}/.local/share/chezmoi,target=/home/dev/.local/share/chezmoi,type=bind,readonly",

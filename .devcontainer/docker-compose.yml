@@ -1,15 +1,13 @@
-# League Draft Dev Container
+# Dev Container with Traefik routing
 #
 # Prerequisites: Start Traefik first:
 #   docker compose -f ~/.local/share/chezmoi/docker/traefik/docker-compose.yml up -d
 #
-# Access:
-#   Frontend: http://league-draft-website.dev.local:3000
-#   Backend:  http://league-draft-website.dev.local:9999
+# Access (PROJECT_NAME defaults to parent directory name):
+#   Frontend: http://${PROJECT_NAME}.dev.local:3000
+#   Backend:  http://${PROJECT_NAME}.dev.local:9999
 #
 # Add to /etc/hosts: 127.0.0.1 *.dev.local (or use Acrylic DNS on Windows)
-
-name: league-draft-website
 
 services:
   dev:
@@ -20,7 +18,7 @@ services:
         USER_UID: ${USER_UID:-1000}
         USER_GID: ${USER_GID:-1000}
     volumes:
-      - ..:/workspaces/league-draft-website:cached
+      - ..:/workspaces/project:cached
       - ${CHEZMOI_SOURCE:-~/.local/share/chezmoi}:/home/dev/.local/share/chezmoi:ro
       - ~/.claude:/home/dev/.claude
       - ~/.ssh:/home/dev/.ssh:ro
@@ -30,7 +28,8 @@ services:
       - npm-cache:/home/dev/.npm
     environment:
       PORT: "9999"
-      VITE_API_URL: "http://${COMPOSE_PROJECT_NAME:-league-draft}.dev.local:9999"
+      PROJECT_NAME: ${PROJECT_NAME}
+      VITE_API_URL: "http://${PROJECT_NAME}.dev.local:9999"
       ENVIRONMENT: development
       DATABASE_URL: postgres://postgres:postgres@db:5432/league_draft?sslmode=disable
       JWT_SECRET: dev-container-jwt-secret
@@ -48,15 +47,15 @@ services:
     labels:
       - "traefik.enable=true"
       # Frontend routing (npm run dev on port 3000)
-      - "traefik.http.routers.league-draft-frontend.rule=Host(`league-draft-website.dev.local`)"
-      - "traefik.http.routers.league-draft-frontend.entrypoints=port3000"
-      - "traefik.http.routers.league-draft-frontend.service=league-draft-frontend"
-      - "traefik.http.services.league-draft-frontend.loadbalancer.server.port=3000"
+      - "traefik.http.routers.${PROJECT_NAME}-frontend.rule=Host(`${PROJECT_NAME}.dev.local`)"
+      - "traefik.http.routers.${PROJECT_NAME}-frontend.entrypoints=port3000"
+      - "traefik.http.routers.${PROJECT_NAME}-frontend.service=${PROJECT_NAME}-frontend"
+      - "traefik.http.services.${PROJECT_NAME}-frontend.loadbalancer.server.port=3000"
       # Backend routing (go run on port 9999)
-      - "traefik.http.routers.league-draft-backend.rule=Host(`league-draft-website.dev.local`)"
-      - "traefik.http.routers.league-draft-backend.entrypoints=port9999"
-      - "traefik.http.routers.league-draft-backend.service=league-draft-backend"
-      - "traefik.http.services.league-draft-backend.loadbalancer.server.port=9999"
+      - "traefik.http.routers.${PROJECT_NAME}-backend.rule=Host(`${PROJECT_NAME}.dev.local`)"
+      - "traefik.http.routers.${PROJECT_NAME}-backend.entrypoints=port9999"
+      - "traefik.http.routers.${PROJECT_NAME}-backend.service=${PROJECT_NAME}-backend"
+      - "traefik.http.services.${PROJECT_NAME}-backend.loadbalancer.server.port=9999"
     depends_on:
       db:
         condition: service_healthy
