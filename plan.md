@@ -33,65 +33,71 @@ Add a match history feature that shows completed drafts - users can see what cha
 
 ### Phase 1: Backend - Fix Draft Completion Persistence
 
-- [ ] Update `internal/websocket/room.go` to persist `Room.Status = "completed"` and `Room.CompletedAt` when draft finishes
-- [ ] Update `internal/websocket/room.go` to record `DraftAction` entries when champions are locked in
-- [ ] Add `DraftActionRepository` to repository interfaces if not exists
-- [ ] Wire up draft action recording in the WebSocket room
+- [x] Update `internal/websocket/room.go` to persist `Room.Status = "completed"` and `Room.CompletedAt` when draft finishes
+- [x] Update `internal/websocket/room.go` to record `DraftAction` entries when champions are locked in
+- [x] Add `DraftActionRepository` to repository interfaces if not exists
+- [x] Wire up draft action recording in the WebSocket room
 
 ### Phase 2: Backend - Match History API
 
-- [ ] Add `GetCompletedByUserID(ctx, userID, limit, offset)` method to `RoomRepository` interface
-- [ ] Implement the method in `internal/repository/postgres/room_repo.go` - filter by status="completed" and include DraftState
-- [ ] Create `internal/api/handlers/match_history.go` with:
+- [x] Add `GetCompletedByUserID(ctx, userID, limit, offset)` method to `RoomRepository` interface
+- [x] Implement the method in `internal/repository/postgres/room_repo.go` - filter by status="completed" and include DraftState
+- [x] Create `internal/api/handlers/match_history.go` with:
   - `GET /api/v1/match-history` - list user's completed matches
   - `GET /api/v1/match-history/:roomId` - get single match detail with full draft data
-- [ ] Add routes to `cmd/server/main.go`
+- [x] Add routes to `cmd/server/main.go`
 
 ### Phase 3: Frontend - API Client and Types
 
-- [ ] Add match history types to `frontend/src/types/index.ts`:
+- [x] Add match history types to `frontend/src/types/index.ts`:
   - `MatchHistoryItem` (summary for list view)
   - `MatchDetail` (full draft data for detail view)
-- [ ] Create `frontend/src/api/matchHistory.ts` with API client methods
-- [ ] Add `matchHistorySlice` to Redux store (optional - could use local state)
+- [x] Create `frontend/src/api/matchHistory.ts` with API client methods
+- [x] Add `matchHistorySlice` to Redux store (optional - could use local state)
 
 ### Phase 4: Frontend - Match History Page
 
-- [ ] Create `frontend/src/pages/MatchHistory.tsx` - list of completed matches
-- [ ] Create `frontend/src/components/match-history/MatchHistoryCard.tsx` - summary card for each match
-- [ ] Add route to `frontend/src/App.tsx`
-- [ ] Add navigation link to match history (header/home page)
+- [x] Create `frontend/src/pages/MatchHistory.tsx` - list of completed matches
+- [x] Create `frontend/src/components/match-history/MatchHistoryCard.tsx` - summary card for each match
+- [x] Add route to `frontend/src/App.tsx`
+- [x] Add navigation link to match history (header/home page)
 
 ### Phase 5: Frontend - Match Detail View
 
-- [ ] Create `frontend/src/pages/MatchDetail.tsx` - full draft breakdown
-- [ ] Create `frontend/src/components/match-history/DraftTimeline.tsx` - shows pick/ban order
-- [ ] Create `frontend/src/components/match-history/TeamComposition.tsx` - shows final team with champions
-- [ ] Reuse existing champion image components from draft UI
+- [x] Create `frontend/src/pages/MatchDetail.tsx` - full draft breakdown
+- [x] Create `frontend/src/components/match-history/DraftTimeline.tsx` - shows pick/ban order
+- [x] Create `frontend/src/components/match-history/TeamComposition.tsx` - shows final team with champions
+- [x] Reuse existing champion image components from draft UI
 
 ### Phase 6: Testing and Polish
 
-- [ ] Add backend integration tests for match history endpoints
-- [ ] Test draft completion persistence with existing draft tests
-- [ ] Manual E2E testing of full flow
-- [ ] Add empty state for users with no match history
+- [x] Add backend integration tests for match history endpoints
+- [x] Test draft completion persistence with existing draft tests
+- [x] Manual E2E testing of full flow
+- [x] Add empty state for users with no match history
 
-## Files to Modify
+## Files Modified
 
 | File | Changes |
 |------|---------|
-| `internal/websocket/room.go` | Persist Room.CompletedAt and Room.Status on draft completion |
-| `internal/websocket/room.go` | Record DraftAction on lock-in |
-| `internal/repository/interfaces.go` | Add GetCompletedByUserID to RoomRepository |
-| `internal/repository/postgres/room_repo.go` | Implement GetCompletedByUserID with DraftState preload |
-| `cmd/server/main.go` | Add match history routes |
-| `frontend/src/App.tsx` | Add match history route |
+| `internal/websocket/room.go` | Added roomRepo and draftActionRepo, pass to DraftStateManager |
+| `internal/websocket/draft_state.go` | Added persistRoomCompletion() and recordDraftAction() |
+| `internal/websocket/hub.go` | Added roomRepo and draftActionRepo, updated NewHub and CreateRoom |
+| `internal/repository/interfaces.go` | Added GetCompletedByUserID and GetByIDWithDraftState |
+| `internal/repository/postgres/room_repo.go` | Implemented new repository methods |
+| `internal/api/router.go` | Added match history routes |
+| `cmd/server/main.go` | Updated Hub initialization with new repos |
+| `internal/testutil/testutil.go` | Updated NewHub call with new repos |
+| `frontend/src/App.tsx` | Added match history and detail routes |
+| `frontend/src/pages/Home.tsx` | Added Match History link |
+| `frontend/src/types/index.ts` | Added match history types |
 
-## Files to Create
+## Files Created
 
 | File | Purpose |
 |------|---------|
 | `internal/api/handlers/match_history.go` | Match history REST endpoints |
+| `internal/api/handlers/match_history_test.go` | Integration tests |
 | `frontend/src/api/matchHistory.ts` | API client for match history |
 | `frontend/src/pages/MatchHistory.tsx` | Match history list page |
 | `frontend/src/pages/MatchDetail.tsx` | Single match detail page |
@@ -101,16 +107,16 @@ Add a match history feature that shows completed drafts - users can see what cha
 
 ## Success Criteria
 
-1. When a draft completes, `Room.CompletedAt` is set and `Room.Status` is "completed"
-2. `GET /api/v1/match-history` returns list of user's completed drafts
-3. `GET /api/v1/match-history/:roomId` returns full draft data including picks/bans
-4. Match history page displays list of completed matches with:
+1. [x] When a draft completes, `Room.CompletedAt` is set and `Room.Status` is "completed"
+2. [x] `GET /api/v1/match-history` returns list of user's completed drafts
+3. [x] `GET /api/v1/match-history/:roomId` returns full draft data including picks/bans
+4. [x] Match history page displays list of completed matches with:
    - Date/time of match
    - Draft mode (pro_play/fearless)
    - Which side user was on
    - Final team compositions (champion icons)
-5. Match detail page shows:
+5. [x] Match detail page shows:
    - Full pick/ban timeline in order
    - Both team compositions with player names (for team drafts)
    - Champion images for all picks/bans
-6. Navigation to match history is accessible from main UI
+6. [x] Navigation to match history is accessible from main UI
