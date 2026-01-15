@@ -3,6 +3,7 @@
   "dockerComposeFile": "docker-compose.yml",
   "service": "dev",
   "workspaceFolder": "/workspaces/project",
+  "initializeCommand": ".devcontainer/setup-env.sh",
 
   "mounts": [
     "source=${localEnv:HOME}/.local/share/chezmoi,target=/home/dev/.local/share/chezmoi,type=bind,readonly",
