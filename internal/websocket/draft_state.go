@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"math/rand"
+	"time"
 
 	"github.com/dom/league-draft-website/internal/domain"
 	"github.com/dom/league-draft-website/internal/repository"
@@ -24,15 +25,17 @@ type DraftState struct {
 
 // DraftStateManager handles draft phase transitions and champion selections.
 type DraftStateManager struct {
-	state         *DraftState
-	currentHover  map[string]*string // side -> championId
-	championRepo  repository.ChampionRepository
-	timerDuration int
-	room          *Room
+	state           *DraftState
+	currentHover    map[string]*string // side -> championId
+	championRepo    repository.ChampionRepository
+	roomRepo        repository.RoomRepository
+	draftActionRepo repository.DraftActionRepository
+	timerDuration   int
+	room            *Room
 }
 
 // NewDraftStateManager creates a new draft state manager.
-func NewDraftStateManager(room *Room, championRepo repository.ChampionRepository, timerDuration int) *DraftStateManager {
+func NewDraftStateManager(room *Room, championRepo repository.ChampionRepository, roomRepo repository.RoomRepository, draftActionRepo repository.DraftActionRepository, timerDuration int) *DraftStateManager {
 	return &DraftStateManager{
 		state: &DraftState{
 			CurrentPhase: 0,
@@ -41,10 +44,12 @@ func NewDraftStateManager(room *Room, championRepo repository.ChampionRepository
 			BluePicks:    []string{},
 			RedPicks:     []string{},
 		},
-		currentHover:  make(map[string]*string),
-		championRepo:  championRepo,
-		timerDuration: timerDuration,
-		room:          room,
+		currentHover:    make(map[string]*string),
+		championRepo:    championRepo,
+		roomRepo:        roomRepo,
+		draftActionRepo: draftActionRepo,
+		timerDuration:   timerDuration,
+		room:            room,
 	}
 }
 
@@ -252,6 +257,9 @@ func (dm *DraftStateManager) advancePhase() {
 	if dm.state.CurrentPhase >= domain.TotalPhases() {
 		dm.state.IsComplete = true
 
+		// Persist room completion to database
+		dm.persistRoomCompletion()
+
 		dm.room.emitter.DraftCompleted(
 			dm.state.BlueBans,
 			dm.state.RedBans,
@@ -293,6 +301,56 @@ func (dm *DraftStateManager) applySelection(phase *domain.Phase, championID stri
 		} else {
 			dm.state.RedPicks = append(dm.state.RedPicks, championID)
 		}
+	}
+
+	// Record the draft action for history
+	dm.recordDraftAction(phase, championID)
+}
+
+// recordDraftAction persists a draft action to the database
+func (dm *DraftStateManager) recordDraftAction(phase *domain.Phase, championID string) {
+	if dm.draftActionRepo == nil {
+		log.Printf("Warning: draftActionRepo is nil, cannot record draft action")
+		return
+	}
+
+	action := &domain.DraftAction{
+		RoomID:     dm.room.id,
+		PhaseIndex: phase.Index,
+		Team:       phase.Team,
+		ActionType: phase.ActionType,
+		ChampionID: championID,
+		ActionTime: time.Now(),
+	}
+
+	ctx := context.Background()
+	if err := dm.draftActionRepo.Create(ctx, action); err != nil {
+		log.Printf("Error recording draft action for room %s phase %d: %v", dm.room.id, phase.Index, err)
+	}
+}
+
+// persistRoomCompletion updates the Room entity when draft completes
+func (dm *DraftStateManager) persistRoomCompletion() {
+	if dm.roomRepo == nil {
+		log.Printf("Warning: roomRepo is nil, cannot persist room completion")
+		return
+	}
+
+	ctx := context.Background()
+	room, err := dm.roomRepo.GetByID(ctx, dm.room.id)
+	if err != nil {
+		log.Printf("Error getting room %s for completion: %v", dm.room.id, err)
+		return
+	}
+
+	now := time.Now()
+	room.Status = domain.RoomStatusCompleted
+	room.CompletedAt = &now
+
+	if err := dm.roomRepo.Update(ctx, room); err != nil {
+		log.Printf("Error updating room %s completion: %v", dm.room.id, err)
+	} else {
+		log.Printf("Room %s marked as completed at %v", dm.room.id, now)
 	}
 }
 
