@@ -73,11 +73,11 @@ export function PendingActionBanner({
   }
 
   return (
-    <div className="bg-yellow-900/30 border border-yellow-600 rounded-lg p-4 mb-6">
+    <div className="bg-yellow-900/30 border border-yellow-600 rounded-lg p-4 mb-6" data-testid="pending-action-banner">
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-yellow-400 font-semibold">
+            <span className="text-yellow-400 font-semibold" data-testid="pending-action-type">
               {ACTION_LABELS[action.actionType] || 'Pending Action'}
             </span>
             <span className="text-gray-400 text-sm">
@@ -105,18 +105,20 @@ export function PendingActionBanner({
               onClick={onApprove}
               disabled={approving}
               className="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg font-medium transition disabled:opacity-50"
+              data-testid="pending-action-approve-button"
             >
               {approving ? 'Approving...' : 'Approve'}
             </button>
           )}
           {hasApproved && isCaptain && (
-            <span className="text-green-400 text-sm font-medium px-3">Approved</span>
+            <span className="text-green-400 text-sm font-medium px-3" data-testid="pending-action-approved-badge">Approved</span>
           )}
           {canCancel && (
             <button
               onClick={onCancel}
               disabled={cancelling}
               className="bg-gray-600 hover:bg-gray-500 text-white px-4 py-2 rounded-lg font-medium transition disabled:opacity-50"
+              data-testid="pending-action-cancel-button"
             >
               {cancelling ? 'Cancelling...' : 'Cancel'}
             </button>
