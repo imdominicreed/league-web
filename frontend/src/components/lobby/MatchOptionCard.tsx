@@ -1,10 +1,15 @@
-import { MatchOption, MatchAssignment, ROLE_DISPLAY_NAMES, ALGORITHM_LABELS, AlgorithmType } from '@/types'
+import { MatchOption, MatchAssignment, ROLE_DISPLAY_NAMES, ALGORITHM_LABELS, AlgorithmType, VoterInfo } from '@/types'
 
 interface MatchOptionCardProps {
   option: MatchOption
   isSelected: boolean
   onSelect?: () => void
   disabled?: boolean
+  voteCount?: number
+  totalVotes?: number
+  isVotingEnabled?: boolean
+  userVote?: number
+  voters?: VoterInfo[]
 }
 
 function getAlgorithmBadgeColor(type: AlgorithmType): string {
@@ -20,7 +25,19 @@ function getAlgorithmBadgeColor(type: AlgorithmType): string {
   }
 }
 
-export function MatchOptionCard({ option, isSelected, onSelect, disabled }: MatchOptionCardProps) {
+export function MatchOptionCard({
+  option,
+  isSelected,
+  onSelect,
+  disabled,
+  voteCount,
+  totalVotes,
+  isVotingEnabled,
+  userVote,
+  voters,
+}: MatchOptionCardProps) {
+  const isUserVote = userVote === option.optionNumber
+  const votePercentage = totalVotes && totalVotes > 0 ? Math.round((voteCount || 0) / totalVotes * 100) : 0
   const blueTeam = option.assignments.filter(a => a.team === 'blue')
   const redTeam = option.assignments.filter(a => a.team === 'red')
 
@@ -73,18 +90,27 @@ export function MatchOptionCard({ option, isSelected, onSelect, disabled }: Matc
     )
   }
 
+  const borderClass = isSelected
+    ? 'border-lol-gold shadow-lg shadow-lol-gold/20'
+    : isUserVote && isVotingEnabled
+    ? 'border-purple-500 shadow-lg shadow-purple-500/20'
+    : 'border-gray-700 hover:border-gray-600'
+
   return (
     <div
       data-testid={`match-option-${option.optionNumber}`}
-      className={`bg-gray-800 rounded-lg p-4 border-2 transition-all ${
-        isSelected
-          ? 'border-lol-gold shadow-lg shadow-lol-gold/20'
-          : 'border-gray-700 hover:border-gray-600'
-      } ${onSelect && !disabled ? 'cursor-pointer' : ''}`}
+      className={`bg-gray-800 rounded-lg p-4 border-2 transition-all ${borderClass} ${onSelect && !disabled ? 'cursor-pointer' : ''}`}
       onClick={() => onSelect && !disabled && onSelect()}
     >
       <div className="flex items-center justify-between mb-1">
-        <span className="text-lg font-bold text-white">Option {option.optionNumber}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-lg font-bold text-white">Option {option.optionNumber}</span>
+          {isUserVote && isVotingEnabled && (
+            <span className="bg-purple-600/20 text-purple-400 px-2 py-0.5 rounded text-xs font-medium">
+              Your Vote
+            </span>
+          )}
+        </div>
         <span
           className={`px-2 py-0.5 rounded text-xs font-medium ${
             option.balanceScore >= 80
@@ -112,7 +138,26 @@ export function MatchOptionCard({ option, isSelected, onSelect, disabled }: Matc
             Max lane gap: {option.maxLaneDiff}
           </span>
         )}
+        {isVotingEnabled && voteCount !== undefined && (
+          <span className="text-xs text-purple-400 font-medium">
+            {voteCount} vote{voteCount !== 1 ? 's' : ''} ({votePercentage}%)
+          </span>
+        )}
       </div>
+
+      {/* Voters list */}
+      {isVotingEnabled && voters && voters.length > 0 && (
+        <div className="mb-3 flex flex-wrap gap-1">
+          {voters.map((voter) => (
+            <span
+              key={voter.userId}
+              className="bg-purple-600/20 text-purple-300 px-2 py-0.5 rounded text-xs"
+            >
+              {voter.displayName}
+            </span>
+          ))}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         {renderTeam(blueTeam, 'blue')}
@@ -124,10 +169,18 @@ export function MatchOptionCard({ option, isSelected, onSelect, disabled }: Matc
           className={`w-full mt-4 py-2 rounded font-semibold transition-colors ${
             isSelected
               ? 'bg-lol-gold text-black'
+              : isUserVote && isVotingEnabled
+              ? 'bg-purple-600 text-white'
               : 'bg-gray-700 hover:bg-gray-600 text-white'
           }`}
         >
-          {isSelected ? 'Selected' : 'Select This Option'}
+          {isSelected
+            ? 'Selected'
+            : isVotingEnabled
+            ? isUserVote
+              ? 'Voted'
+              : 'Vote for This'
+            : 'Select This Option'}
         </button>
       )}
     </div>

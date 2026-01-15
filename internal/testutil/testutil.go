@@ -77,6 +77,7 @@ func NewTestDB(t *testing.T) *TestDB {
 		&domain.MatchOption{},
 		&domain.MatchOptionAssignment{},
 		&domain.RoomPlayer{},
+		&domain.Vote{},
 	)
 	if err != nil {
 		t.Fatalf("failed to run migrations: %v", err)
@@ -108,6 +109,7 @@ func (tdb *TestDB) Truncate(t *testing.T) {
 	t.Helper()
 
 	tables := []string{
+		"votes",
 		"match_option_assignments",
 		"match_options",
 		"lobby_players",

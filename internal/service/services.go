@@ -36,6 +36,7 @@ func NewServices(repos *repository.Repositories, cfg *config.Config) *Services {
 			repos.UserRoleProfile,
 			repos.RoomPlayer,
 			repos.PendingAction,
+			repos.Vote,
 			roomService,
 			matchmakingService,
 		),

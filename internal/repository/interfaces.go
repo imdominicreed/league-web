@@ -108,6 +108,16 @@ type PendingActionRepository interface {
 	CancelAllPending(ctx context.Context, lobbyID uuid.UUID) error
 }
 
+type VoteRepository interface {
+	Create(ctx context.Context, vote *domain.Vote) error
+	Update(ctx context.Context, vote *domain.Vote) error
+	GetByLobbyAndUser(ctx context.Context, lobbyID, userID uuid.UUID) (*domain.Vote, error)
+	GetVotesByLobby(ctx context.Context, lobbyID uuid.UUID) ([]*domain.Vote, error)
+	GetVoteCounts(ctx context.Context, lobbyID uuid.UUID) (map[int]int, error)
+	DeleteByLobby(ctx context.Context, lobbyID uuid.UUID) error
+	DeleteByLobbyAndUser(ctx context.Context, lobbyID, userID uuid.UUID) error
+}
+
 type Repositories struct {
 	User            UserRepository
 	Session         SessionRepository
@@ -122,4 +132,5 @@ type Repositories struct {
 	MatchOption     MatchOptionRepository
 	RoomPlayer      RoomPlayerRepository
 	PendingAction   PendingActionRepository
+	Vote            VoteRepository
 }

@@ -32,17 +32,22 @@ func NewLobbyHandler(lobbyService *service.LobbyService, matchmakingService *ser
 type CreateLobbyRequest struct {
 	DraftMode            string `json:"draftMode"`
 	TimerDurationSeconds int    `json:"timerDurationSeconds"`
+	VotingEnabled        bool   `json:"votingEnabled"`
+	VotingMode           string `json:"votingMode"`
 }
 
 type LobbyResponse struct {
-	ID                   string              `json:"id"`
-	ShortCode            string              `json:"shortCode"`
-	CreatedBy            string              `json:"createdBy"`
-	Status               string              `json:"status"`
-	SelectedMatchOption  *int                `json:"selectedMatchOption"`
-	DraftMode            string              `json:"draftMode"`
-	TimerDurationSeconds int                 `json:"timerDurationSeconds"`
-	RoomID               *string             `json:"roomId"`
+	ID                   string                `json:"id"`
+	ShortCode            string                `json:"shortCode"`
+	CreatedBy            string                `json:"createdBy"`
+	Status               string                `json:"status"`
+	SelectedMatchOption  *int                  `json:"selectedMatchOption"`
+	DraftMode            string                `json:"draftMode"`
+	TimerDurationSeconds int                   `json:"timerDurationSeconds"`
+	RoomID               *string               `json:"roomId"`
+	VotingEnabled        bool                  `json:"votingEnabled"`
+	VotingMode           string                `json:"votingMode"`
+	VotingDeadline       *string               `json:"votingDeadline,omitempty"`
 	Players              []LobbyPlayerResponse `json:"players"`
 }
 
@@ -123,6 +128,30 @@ type SelectOptionRequest struct {
 	OptionNumber int `json:"optionNumber"`
 }
 
+type VoteRequest struct {
+	OptionNumber int `json:"optionNumber"`
+}
+
+type StartVotingRequest struct {
+	DurationSeconds int `json:"durationSeconds"`
+}
+
+type EndVotingRequest struct {
+	ForceOption *int `json:"forceOption,omitempty"`
+}
+
+type VotingStatusResponse struct {
+	VotingEnabled bool           `json:"votingEnabled"`
+	VotingMode    string         `json:"votingMode"`
+	Deadline      *string        `json:"deadline,omitempty"`
+	TotalPlayers  int            `json:"totalPlayers"`
+	VotesCast     int            `json:"votesCast"`
+	VoteCounts    map[int]int    `json:"voteCounts"`
+	UserVote      *int           `json:"userVote,omitempty"`
+	WinningOption *int           `json:"winningOption,omitempty"`
+	CanFinalize   bool           `json:"canFinalize"`
+}
+
 type StartDraftResponse struct {
 	ID                   string  `json:"id"`
 	ShortCode            string  `json:"shortCode"`
@@ -153,9 +182,19 @@ func (h *LobbyHandler) Create(w http.ResponseWriter, r *http.Request) {
 		draftMode = domain.DraftModeFearless
 	}
 
+	votingMode := domain.VotingModeMajority
+	switch req.VotingMode {
+	case "unanimous":
+		votingMode = domain.VotingModeUnanimous
+	case "captain_override":
+		votingMode = domain.VotingModeCaptainOverride
+	}
+
 	lobby, err := h.lobbyService.CreateLobby(r.Context(), userID, service.CreateLobbyInput{
 		DraftMode:            draftMode,
 		TimerDurationSeconds: req.TimerDurationSeconds,
+		VotingEnabled:        req.VotingEnabled,
+		VotingMode:           votingMode,
 	})
 	if err != nil {
 		log.Printf("ERROR [lobby.Create] failed to create lobby: %v", err)
@@ -982,6 +1021,201 @@ func (h *LobbyHandler) GetTeamStats(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+// ==================== Voting ====================
+
+func (h *LobbyHandler) Vote(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	lobbyID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid lobby ID", http.StatusBadRequest)
+		return
+	}
+
+	var req VoteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	status, err := h.lobbyService.CastVote(r.Context(), lobbyID, userID, req.OptionNumber)
+	if err != nil {
+		if errors.Is(err, service.ErrVotingNotEnabled) {
+			http.Error(w, "Voting is not enabled", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, service.ErrNotInLobby) {
+			http.Error(w, "Not in lobby", http.StatusForbidden)
+			return
+		}
+		if errors.Is(err, service.ErrInvalidMatchOption) {
+			http.Error(w, "Invalid match option", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, service.ErrInvalidLobbyState) {
+			http.Error(w, "Invalid lobby state for voting", http.StatusConflict)
+			return
+		}
+		log.Printf("ERROR [lobby.Vote] failed: %v", err)
+		http.Error(w, "Failed to cast vote", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(toVotingStatusResponse(status))
+}
+
+func (h *LobbyHandler) GetVotingStatus(w http.ResponseWriter, r *http.Request) {
+	userID, _ := middleware.GetUserID(r.Context())
+
+	lobbyID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid lobby ID", http.StatusBadRequest)
+		return
+	}
+
+	var userIDPtr *uuid.UUID
+	if userID != uuid.Nil {
+		userIDPtr = &userID
+	}
+
+	status, err := h.lobbyService.GetVotingStatus(r.Context(), lobbyID, userIDPtr)
+	if err != nil {
+		if errors.Is(err, service.ErrLobbyNotFound) {
+			http.Error(w, "Lobby not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("ERROR [lobby.GetVotingStatus] failed: %v", err)
+		http.Error(w, "Failed to get voting status", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(toVotingStatusResponse(status))
+}
+
+func (h *LobbyHandler) StartVoting(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	lobbyID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid lobby ID", http.StatusBadRequest)
+		return
+	}
+
+	var req StartVotingRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.lobbyService.StartVoting(r.Context(), lobbyID, userID, req.DurationSeconds); err != nil {
+		if errors.Is(err, service.ErrNotCaptain) {
+			http.Error(w, "Only captain can start voting", http.StatusForbidden)
+			return
+		}
+		if errors.Is(err, service.ErrNotInLobby) {
+			http.Error(w, "Not in lobby", http.StatusForbidden)
+			return
+		}
+		if errors.Is(err, service.ErrInvalidLobbyState) {
+			http.Error(w, "Invalid lobby state for voting", http.StatusConflict)
+			return
+		}
+		log.Printf("ERROR [lobby.StartVoting] failed: %v", err)
+		http.Error(w, "Failed to start voting", http.StatusInternalServerError)
+		return
+	}
+
+	// Return updated lobby
+	lobby, _ := h.lobbyService.GetLobby(r.Context(), lobbyID.String())
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(toLobbyResponse(lobby))
+}
+
+func (h *LobbyHandler) EndVoting(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	lobbyID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid lobby ID", http.StatusBadRequest)
+		return
+	}
+
+	var req EndVotingRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		// Allow empty body
+		req = EndVotingRequest{}
+	}
+
+	lobby, err := h.lobbyService.EndVoting(r.Context(), lobbyID, userID, req.ForceOption)
+	if err != nil {
+		if errors.Is(err, service.ErrNotCaptain) {
+			http.Error(w, "Only captain can end voting", http.StatusForbidden)
+			return
+		}
+		if errors.Is(err, service.ErrNotInLobby) {
+			http.Error(w, "Not in lobby", http.StatusForbidden)
+			return
+		}
+		if errors.Is(err, service.ErrVotingNotEnabled) {
+			http.Error(w, "Voting is not enabled", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, service.ErrInvalidLobbyState) {
+			http.Error(w, "Invalid lobby state", http.StatusConflict)
+			return
+		}
+		if errors.Is(err, service.ErrInvalidMatchOption) {
+			http.Error(w, "Invalid match option", http.StatusBadRequest)
+			return
+		}
+		log.Printf("ERROR [lobby.EndVoting] failed: %v", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(toLobbyResponse(lobby))
+}
+
+func toVotingStatusResponse(status *domain.VotingStatus) VotingStatusResponse {
+	var deadline *string
+	if status.Deadline != nil {
+		s := status.Deadline.Format("2006-01-02T15:04:05Z07:00")
+		deadline = &s
+	}
+
+	voteCounts := status.VoteCounts
+	if voteCounts == nil {
+		voteCounts = make(map[int]int)
+	}
+
+	return VotingStatusResponse{
+		VotingEnabled: status.VotingEnabled,
+		VotingMode:    string(status.VotingMode),
+		Deadline:      deadline,
+		TotalPlayers:  status.TotalPlayers,
+		VotesCast:     status.VotesCast,
+		VoteCounts:    voteCounts,
+		UserVote:      status.UserVote,
+		WinningOption: status.WinningOption,
+		CanFinalize:   status.CanFinalize,
+	}
+}
+
 // Helper functions
 func toLobbyResponse(lobby *domain.Lobby) LobbyResponse {
 	var roomID *string
@@ -1019,6 +1253,12 @@ func toLobbyResponse(lobby *domain.Lobby) LobbyResponse {
 		}
 	}
 
+	var votingDeadline *string
+	if lobby.VotingDeadline != nil {
+		s := lobby.VotingDeadline.Format("2006-01-02T15:04:05Z07:00")
+		votingDeadline = &s
+	}
+
 	return LobbyResponse{
 		ID:                   lobby.ID.String(),
 		ShortCode:            lobby.ShortCode,
@@ -1028,6 +1268,9 @@ func toLobbyResponse(lobby *domain.Lobby) LobbyResponse {
 		DraftMode:            string(lobby.DraftMode),
 		TimerDurationSeconds: lobby.TimerDurationSeconds,
 		RoomID:               roomID,
+		VotingEnabled:        lobby.VotingEnabled,
+		VotingMode:           string(lobby.VotingMode),
+		VotingDeadline:       votingDeadline,
 		Players:              players,
 	}
 }

@@ -34,10 +34,16 @@ type Lobby struct {
 	StartedAt            *time.Time  `json:"startedAt"`
 	CompletedAt          *time.Time  `json:"completedAt"`
 
+	// Voting settings
+	VotingEnabled  bool        `json:"votingEnabled" gorm:"not null;default:false"`
+	VotingMode     VotingMode  `json:"votingMode" gorm:"type:varchar(20);default:'majority'"`
+	VotingDeadline *time.Time  `json:"votingDeadline,omitempty"`
+
 	// Relations
 	Creator *User         `json:"creator,omitempty" gorm:"foreignKey:CreatedBy"`
 	Players []LobbyPlayer `json:"players,omitempty" gorm:"foreignKey:LobbyID"`
 	Room    *Room         `json:"room,omitempty" gorm:"foreignKey:RoomID"`
+	Votes   []Vote        `json:"votes,omitempty" gorm:"foreignKey:LobbyID"`
 }
 
 // TableName returns the table name for GORM

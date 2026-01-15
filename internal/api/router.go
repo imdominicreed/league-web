@@ -110,6 +110,12 @@ func NewRouter(services *service.Services, hub *websocket.Hub, repos *repository
 
 				// Team stats
 				r.Get("/{id}/team-stats", lobbyHandler.GetTeamStats)
+
+				// Voting
+				r.Post("/{id}/vote", lobbyHandler.Vote)
+				r.Get("/{id}/voting-status", lobbyHandler.GetVotingStatus)
+				r.Post("/{id}/start-voting", lobbyHandler.StartVoting)
+				r.Post("/{id}/end-voting", lobbyHandler.EndVoting)
 			})
 		})
 

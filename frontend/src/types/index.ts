@@ -142,6 +142,38 @@ export interface UserProfile {
 // Lobby types
 export type LobbyStatus = 'waiting_for_players' | 'matchmaking' | 'team_selected' | 'drafting' | 'completed'
 
+export type VotingMode = 'majority' | 'unanimous' | 'captain_override'
+
+export const VOTING_MODE_LABELS: Record<VotingMode, string> = {
+  majority: 'Majority Vote',
+  unanimous: 'Unanimous',
+  captain_override: 'Captain Override',
+}
+
+export const VOTING_MODE_DESCRIPTIONS: Record<VotingMode, string> = {
+  majority: 'Option with more than 50% of votes wins',
+  unanimous: 'All players must vote for the same option',
+  captain_override: 'Majority wins, but captain can force an option',
+}
+
+export interface VoterInfo {
+  userId: string
+  displayName: string
+}
+
+export interface VotingStatus {
+  votingEnabled: boolean
+  votingMode: VotingMode
+  deadline?: string
+  totalPlayers: number
+  votesCast: number
+  voteCounts: Record<number, number>
+  voters: Record<number, VoterInfo[]>
+  userVote?: number
+  winningOption?: number
+  canFinalize: boolean
+}
+
 export interface Lobby {
   id: string
   shortCode: string
@@ -151,6 +183,9 @@ export interface Lobby {
   draftMode: 'pro_play' | 'fearless'
   timerDurationSeconds: number
   roomId: string | null
+  votingEnabled: boolean
+  votingMode: VotingMode
+  votingDeadline?: string
   players: LobbyPlayer[]
 }
 

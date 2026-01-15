@@ -239,4 +239,60 @@ export class LobbyRoomPage extends BasePage {
   async expectPlayerActions() {
     await expect(this.page.locator('text=Player Actions')).toBeVisible();
   }
+
+  // ========== Voting Methods ==========
+
+  async expectVotingBanner() {
+    await expect(this.page.locator('[data-testid="voting-banner"]')).toBeVisible();
+  }
+
+  async expectNoVotingBanner() {
+    await expect(this.page.locator('[data-testid="voting-banner"]')).not.toBeVisible();
+  }
+
+  async expectVoteForTeamComposition() {
+    await expect(this.page.locator('text=Vote for Team Composition')).toBeVisible();
+  }
+
+  async voteForOption(optionNumber: number) {
+    const optionCard = this.byTestId(`match-option-${optionNumber}`);
+    await optionCard.locator('button:has-text("Vote for This")').click();
+  }
+
+  async expectVotedOnOption(optionNumber: number) {
+    const optionCard = this.byTestId(`match-option-${optionNumber}`);
+    await expect(optionCard.locator('text=Your Vote')).toBeVisible();
+    await expect(optionCard.locator('button:has-text("Voted")')).toBeVisible();
+  }
+
+  async expectVoteCount(optionNumber: number, count: number) {
+    const optionCard = this.byTestId(`match-option-${optionNumber}`);
+    await expect(optionCard.locator(`text=${count} vote`)).toBeVisible();
+  }
+
+  async expectVotingProgress(votesCount: number, totalPlayers: number) {
+    await expect(
+      this.page.locator(`text=${votesCount}/${totalPlayers} votes`)
+    ).toBeVisible();
+  }
+
+  async expectCanFinalize() {
+    await expect(this.page.locator('text=Majority reached')).toBeVisible();
+  }
+
+  async expectCannotFinalize() {
+    await expect(this.page.locator('text=Waiting for majority')).toBeVisible();
+  }
+
+  async clickEndVoting() {
+    await this.page.click('button:has-text("End Voting")');
+  }
+
+  async clickForceSelect(optionNumber: number) {
+    await this.page.click(`button:has-text("Force Option ${optionNumber}")`);
+  }
+
+  async expectEndVotingButton() {
+    await expect(this.page.locator('button:has-text("End Voting")')).toBeVisible();
+  }
 }

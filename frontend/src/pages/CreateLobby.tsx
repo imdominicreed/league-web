@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import { RootState, AppDispatch } from '@/store'
 import { createLobby } from '@/store/slices/lobbySlice'
+import { VotingMode, VOTING_MODE_LABELS, VOTING_MODE_DESCRIPTIONS } from '@/types'
 
 export default function CreateLobby() {
   const navigate = useNavigate()
@@ -11,9 +12,16 @@ export default function CreateLobby() {
 
   const [draftMode, setDraftMode] = useState<'pro_play' | 'fearless'>('pro_play')
   const [timerDuration, setTimerDuration] = useState(30)
+  const [votingEnabled, setVotingEnabled] = useState(false)
+  const [votingMode, setVotingMode] = useState<VotingMode>('majority')
 
   const handleCreate = async () => {
-    const result = await dispatch(createLobby({ draftMode, timerDurationSeconds: timerDuration }))
+    const result = await dispatch(createLobby({
+      draftMode,
+      timerDurationSeconds: timerDuration,
+      votingEnabled,
+      votingMode: votingEnabled ? votingMode : undefined,
+    }))
     if (createLobby.fulfilled.match(result)) {
       navigate(`/lobby/${result.payload.id}`)
     }
@@ -52,6 +60,42 @@ export default function CreateLobby() {
             max={120}
             className="w-full bg-gray-700 border border-gray-600 rounded px-4 py-2 text-white"
           />
+        </div>
+
+        {/* Voting Section */}
+        <div className="mb-6">
+          <div className="flex items-center gap-3 mb-4">
+            <input
+              type="checkbox"
+              id="votingEnabled"
+              checked={votingEnabled}
+              onChange={(e) => setVotingEnabled(e.target.checked)}
+              className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-lol-blue focus:ring-lol-blue"
+            />
+            <label htmlFor="votingEnabled" className="text-gray-300">
+              Enable Team Voting
+            </label>
+          </div>
+
+          {votingEnabled && (
+            <div className="ml-7">
+              <label className="block text-gray-300 mb-2 text-sm">Voting Mode</label>
+              <select
+                value={votingMode}
+                onChange={(e) => setVotingMode(e.target.value as VotingMode)}
+                className="w-full bg-gray-700 border border-gray-600 rounded px-4 py-2 text-white text-sm"
+              >
+                {(['majority', 'unanimous', 'captain_override'] as VotingMode[]).map(mode => (
+                  <option key={mode} value={mode}>
+                    {VOTING_MODE_LABELS[mode]}
+                  </option>
+                ))}
+              </select>
+              <p className="text-gray-500 text-xs mt-2">
+                {VOTING_MODE_DESCRIPTIONS[votingMode]}
+              </p>
+            </div>
+          )}
         </div>
 
         <button

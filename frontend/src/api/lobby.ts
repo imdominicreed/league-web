@@ -1,9 +1,11 @@
 import { api } from './client'
-import { Lobby, LobbyPlayer, MatchOption, Room, PendingAction, TeamStats } from '@/types'
+import { Lobby, LobbyPlayer, MatchOption, Room, PendingAction, TeamStats, VotingStatus, VotingMode } from '@/types'
 
 interface CreateLobbyRequest {
   draftMode: 'pro_play' | 'fearless'
   timerDurationSeconds?: number
+  votingEnabled?: boolean
+  votingMode?: VotingMode
 }
 
 interface SwapRequest {
@@ -75,4 +77,17 @@ export const lobbyApi = {
   // Team stats
   getTeamStats: (lobbyId: string): Promise<TeamStats> =>
     api.get(`/lobbies/${lobbyId}/team-stats`),
+
+  // Voting
+  castVote: (lobbyId: string, optionNumber: number): Promise<VotingStatus> =>
+    api.post(`/lobbies/${lobbyId}/vote`, { optionNumber }),
+
+  getVotingStatus: (lobbyId: string): Promise<VotingStatus> =>
+    api.get(`/lobbies/${lobbyId}/voting-status`),
+
+  startVoting: (lobbyId: string, durationSeconds?: number): Promise<Lobby> =>
+    api.post(`/lobbies/${lobbyId}/start-voting`, { durationSeconds: durationSeconds || 0 }),
+
+  endVoting: (lobbyId: string, forceOption?: number): Promise<Lobby> =>
+    api.post(`/lobbies/${lobbyId}/end-voting`, forceOption !== undefined ? { forceOption } : {}),
 }

@@ -1,12 +1,13 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit'
 import { lobbyApi } from '@/api/lobby'
-import { Lobby, LobbyPlayer, MatchOption, Room, PendingAction, TeamStats } from '@/types'
+import { Lobby, LobbyPlayer, MatchOption, Room, PendingAction, TeamStats, VotingStatus, VotingMode } from '@/types'
 
 interface LobbyState {
   lobby: Lobby | null
   matchOptions: MatchOption[] | null
   pendingAction: PendingAction | null
   teamStats: TeamStats | null
+  votingStatus: VotingStatus | null
   loading: boolean
   error: string | null
   generatingTeams: boolean
@@ -22,6 +23,11 @@ interface LobbyState {
   approvingAction: boolean
   cancellingAction: boolean
   fetchingTeamStats: boolean
+  // Voting loading states
+  castingVote: boolean
+  startingVoting: boolean
+  endingVoting: boolean
+  fetchingVotingStatus: boolean
 }
 
 const initialState: LobbyState = {
@@ -29,6 +35,7 @@ const initialState: LobbyState = {
   matchOptions: null,
   pendingAction: null,
   teamStats: null,
+  votingStatus: null,
   loading: false,
   error: null,
   generatingTeams: false,
@@ -42,11 +49,15 @@ const initialState: LobbyState = {
   approvingAction: false,
   cancellingAction: false,
   fetchingTeamStats: false,
+  castingVote: false,
+  startingVoting: false,
+  endingVoting: false,
+  fetchingVotingStatus: false,
 }
 
 export const createLobby = createAsyncThunk(
   'lobby/create',
-  async (data: { draftMode: 'pro_play' | 'fearless'; timerDurationSeconds?: number }) => {
+  async (data: { draftMode: 'pro_play' | 'fearless'; timerDurationSeconds?: number; votingEnabled?: boolean; votingMode?: VotingMode }) => {
     return await lobbyApi.create(data)
   }
 )
@@ -199,6 +210,35 @@ export const fetchTeamStats = createAsyncThunk(
   }
 )
 
+// Voting thunks
+export const castVote = createAsyncThunk(
+  'lobby/castVote',
+  async ({ lobbyId, optionNumber }: { lobbyId: string; optionNumber: number }) => {
+    return await lobbyApi.castVote(lobbyId, optionNumber)
+  }
+)
+
+export const fetchVotingStatus = createAsyncThunk(
+  'lobby/fetchVotingStatus',
+  async (lobbyId: string) => {
+    return await lobbyApi.getVotingStatus(lobbyId)
+  }
+)
+
+export const startVoting = createAsyncThunk(
+  'lobby/startVoting',
+  async ({ lobbyId, durationSeconds }: { lobbyId: string; durationSeconds?: number }) => {
+    return await lobbyApi.startVoting(lobbyId, durationSeconds)
+  }
+)
+
+export const endVoting = createAsyncThunk(
+  'lobby/endVoting',
+  async ({ lobbyId, forceOption }: { lobbyId: string; forceOption?: number }) => {
+    return await lobbyApi.endVoting(lobbyId, forceOption)
+  }
+)
+
 const lobbySlice = createSlice({
   name: 'lobby',
   initialState,
@@ -208,6 +248,7 @@ const lobbySlice = createSlice({
       state.matchOptions = null
       state.pendingAction = null
       state.teamStats = null
+      state.votingStatus = null
       state.error = null
     },
     clearLobbyError: (state) => {
@@ -239,6 +280,9 @@ const lobbySlice = createSlice({
     },
     setTeamStats: (state, action: PayloadAction<TeamStats | null>) => {
       state.teamStats = action.payload
+    },
+    setVotingStatus: (state, action: PayloadAction<VotingStatus | null>) => {
+      state.votingStatus = action.payload
     },
   },
   extraReducers: (builder) => {
@@ -472,6 +516,57 @@ const lobbySlice = createSlice({
       .addCase(fetchTeamStats.rejected, (state) => {
         state.fetchingTeamStats = false
       })
+      // Cast vote
+      .addCase(castVote.pending, (state) => {
+        state.castingVote = true
+        state.error = null
+      })
+      .addCase(castVote.fulfilled, (state, action) => {
+        state.castingVote = false
+        state.votingStatus = action.payload
+      })
+      .addCase(castVote.rejected, (state, action) => {
+        state.castingVote = false
+        state.error = action.error.message || 'Failed to cast vote'
+      })
+      // Fetch voting status
+      .addCase(fetchVotingStatus.pending, (state) => {
+        state.fetchingVotingStatus = true
+      })
+      .addCase(fetchVotingStatus.fulfilled, (state, action) => {
+        state.fetchingVotingStatus = false
+        state.votingStatus = action.payload
+      })
+      .addCase(fetchVotingStatus.rejected, (state) => {
+        state.fetchingVotingStatus = false
+      })
+      // Start voting
+      .addCase(startVoting.pending, (state) => {
+        state.startingVoting = true
+        state.error = null
+      })
+      .addCase(startVoting.fulfilled, (state, action) => {
+        state.startingVoting = false
+        state.lobby = action.payload
+      })
+      .addCase(startVoting.rejected, (state, action) => {
+        state.startingVoting = false
+        state.error = action.error.message || 'Failed to start voting'
+      })
+      // End voting
+      .addCase(endVoting.pending, (state) => {
+        state.endingVoting = true
+        state.error = null
+      })
+      .addCase(endVoting.fulfilled, (state, action) => {
+        state.endingVoting = false
+        state.lobby = action.payload
+        state.votingStatus = null
+      })
+      .addCase(endVoting.rejected, (state, action) => {
+        state.endingVoting = false
+        state.error = action.error.message || 'Failed to end voting'
+      })
   },
 })
 
@@ -484,5 +579,6 @@ export const {
   setMatchOptions,
   setPendingAction,
   setTeamStats,
+  setVotingStatus,
 } = lobbySlice.actions
 export default lobbySlice.reducer

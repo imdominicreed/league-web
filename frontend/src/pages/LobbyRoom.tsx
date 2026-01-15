@@ -19,12 +19,16 @@ import {
   approvePendingAction,
   cancelPendingAction,
   fetchTeamStats,
+  castVote,
+  fetchVotingStatus,
+  endVoting,
 } from '@/store/slices/lobbySlice'
 import { TeamColumn } from '@/components/lobby/TeamColumn'
 import { PendingActionBanner } from '@/components/lobby/PendingActionBanner'
 import { TeamStatsPanel } from '@/components/lobby/TeamStatsPanel'
 import { CaptainControls } from '@/components/lobby/CaptainControls'
 import { MatchOptionCard } from '@/components/lobby/MatchOptionCard'
+import { VotingBanner } from '@/components/lobby/VotingBanner'
 
 export default function LobbyRoom() {
   const { lobbyId } = useParams<{ lobbyId: string }>()
@@ -36,6 +40,7 @@ export default function LobbyRoom() {
     matchOptions,
     pendingAction,
     teamStats,
+    votingStatus,
     loading,
     error,
     startingDraft,
@@ -47,6 +52,8 @@ export default function LobbyRoom() {
     approvingAction,
     cancellingAction,
     fetchingTeamStats,
+    castingVote,
+    endingVoting,
   } = useSelector((state: RootState) => state.lobby)
   const { user } = useSelector((state: RootState) => state.auth)
 
@@ -83,6 +90,18 @@ export default function LobbyRoom() {
       dispatch(fetchTeamStats(lobby.id))
     }
   }, [lobby, teamStats, dispatch])
+
+  // Fetch voting status when voting is enabled
+  useEffect(() => {
+    if (lobby?.votingEnabled && lobby.status === 'matchmaking') {
+      dispatch(fetchVotingStatus(lobby.id))
+      // Poll voting status more frequently when voting is active
+      const votingPollInterval = setInterval(() => {
+        dispatch(fetchVotingStatus(lobby.id))
+      }, 2000)
+      return () => clearInterval(votingPollInterval)
+    }
+  }, [lobby?.id, lobby?.votingEnabled, lobby?.status, dispatch])
 
   // Navigate to draft when it starts
   useEffect(() => {
@@ -207,6 +226,14 @@ export default function LobbyRoom() {
     if (lobby) dispatch(startDraft(lobby.id))
   }, [lobby, dispatch])
 
+  const handleCastVote = useCallback((optionNumber: number) => {
+    if (lobby) dispatch(castVote({ lobbyId: lobby.id, optionNumber }))
+  }, [lobby, dispatch])
+
+  const handleEndVoting = useCallback((forceOption?: number) => {
+    if (lobby) dispatch(endVoting({ lobbyId: lobby.id, forceOption }))
+  }, [lobby, dispatch])
+
   if (loading && !lobby) {
     return <div className="min-h-screen flex items-center justify-center text-gray-400">Loading...</div>
   }
@@ -246,6 +273,18 @@ export default function LobbyRoom() {
             onCancel={handleCancelPendingAction}
             approving={approvingAction}
             cancelling={cancellingAction}
+          />
+        )}
+
+        {/* Voting Banner */}
+        {lobby.votingEnabled && votingStatus && lobby.status === 'matchmaking' && (
+          <VotingBanner
+            votingStatus={votingStatus}
+            isCaptain={isCaptain}
+            canForceOption={lobby.votingMode === 'captain_override'}
+            winningOptionNum={votingStatus.winningOption}
+            onEndVoting={handleEndVoting}
+            endingVoting={endingVoting}
           />
         )}
 
@@ -341,14 +380,20 @@ export default function LobbyRoom() {
         {(lobby.status === 'matchmaking' || lobby.status === 'team_selected') && matchOptions && (
           <div className="space-y-6 mt-8">
             <h2 className="text-xl font-semibold text-white">
-              {lobby.status === 'matchmaking' ? 'Select Team Composition' : 'Selected Team Composition'}
+              {lobby.status === 'matchmaking'
+                ? lobby.votingEnabled
+                  ? 'Vote for Team Composition'
+                  : 'Select Team Composition'
+                : 'Selected Team Composition'}
             </h2>
             <p className="text-gray-400 text-sm">
-              {isCaptain && lobby.status === 'matchmaking'
-                ? 'Click on an option to propose it. The other captain must approve.'
-                : lobby.status === 'matchmaking'
-                  ? 'Waiting for a captain to propose a team composition...'
-                  : ''}
+              {lobby.status === 'matchmaking'
+                ? lobby.votingEnabled
+                  ? 'Click on an option to cast your vote.'
+                  : isCaptain
+                    ? 'Click on an option to propose it. The other captain must approve.'
+                    : 'Waiting for a captain to propose a team composition...'
+                : ''}
             </p>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {matchOptions.map(opt => (
@@ -356,10 +401,21 @@ export default function LobbyRoom() {
                   key={opt.optionNumber}
                   option={opt}
                   isSelected={lobby.selectedMatchOption === opt.optionNumber}
-                  onSelect={isCaptain && lobby.status === 'matchmaking' && !proposingAction
-                    ? () => handleProposeSelectOption(opt.optionNumber)
-                    : undefined}
-                  disabled={!isCaptain || lobby.status === 'team_selected' || proposingAction}
+                  onSelect={
+                    lobby.status === 'matchmaking' && !castingVote
+                      ? lobby.votingEnabled
+                        ? () => handleCastVote(opt.optionNumber)
+                        : isCaptain && !proposingAction
+                          ? () => handleProposeSelectOption(opt.optionNumber)
+                          : undefined
+                      : undefined
+                  }
+                  disabled={lobby.status === 'team_selected' || castingVote || (!lobby.votingEnabled && (!isCaptain || proposingAction))}
+                  voteCount={votingStatus?.voteCounts?.[opt.optionNumber] || 0}
+                  totalVotes={votingStatus?.votesCast || 0}
+                  isVotingEnabled={lobby.votingEnabled && lobby.status === 'matchmaking'}
+                  userVote={votingStatus?.userVote}
+                  voters={votingStatus?.voters?.[opt.optionNumber]}
                 />
               ))}
             </div>

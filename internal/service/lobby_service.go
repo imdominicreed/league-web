@@ -36,6 +36,9 @@ var (
 	ErrPlayerNotFound        = errors.New("player not found")
 	ErrCannotKickSelf        = errors.New("cannot kick yourself")
 	ErrInvalidSwap           = errors.New("invalid swap request")
+	ErrVotingNotEnabled      = errors.New("voting is not enabled for this lobby")
+	ErrVotingNotActive       = errors.New("voting is not currently active")
+	ErrInvalidVotingMode     = errors.New("invalid voting mode")
 )
 
 type LobbyService struct {
@@ -45,6 +48,7 @@ type LobbyService struct {
 	profileRepo        repository.UserRoleProfileRepository
 	roomPlayerRepo     repository.RoomPlayerRepository
 	pendingActionRepo  repository.PendingActionRepository
+	voteRepo           repository.VoteRepository
 	roomService        *RoomService
 	matchmakingService *MatchmakingService
 }
@@ -56,6 +60,7 @@ func NewLobbyService(
 	profileRepo repository.UserRoleProfileRepository,
 	roomPlayerRepo repository.RoomPlayerRepository,
 	pendingActionRepo repository.PendingActionRepository,
+	voteRepo repository.VoteRepository,
 	roomService *RoomService,
 	matchmakingService *MatchmakingService,
 ) *LobbyService {
@@ -66,6 +71,7 @@ func NewLobbyService(
 		profileRepo:        profileRepo,
 		roomPlayerRepo:     roomPlayerRepo,
 		pendingActionRepo:  pendingActionRepo,
+		voteRepo:           voteRepo,
 		roomService:        roomService,
 		matchmakingService: matchmakingService,
 	}
@@ -74,6 +80,8 @@ func NewLobbyService(
 type CreateLobbyInput struct {
 	DraftMode            domain.DraftMode
 	TimerDurationSeconds int
+	VotingEnabled        bool
+	VotingMode           domain.VotingMode
 }
 
 func (s *LobbyService) CreateLobby(ctx context.Context, creatorID uuid.UUID, input CreateLobbyInput) (*domain.Lobby, error) {
@@ -84,6 +92,11 @@ func (s *LobbyService) CreateLobby(ctx context.Context, creatorID uuid.UUID, inp
 		timerDuration = 30
 	}
 
+	votingMode := input.VotingMode
+	if votingMode == "" {
+		votingMode = domain.VotingModeMajority
+	}
+
 	lobby := &domain.Lobby{
 		ID:                   uuid.New(),
 		ShortCode:            shortCode,
@@ -91,6 +104,8 @@ func (s *LobbyService) CreateLobby(ctx context.Context, creatorID uuid.UUID, inp
 		Status:               domain.LobbyStatusWaitingForPlayers,
 		DraftMode:            input.DraftMode,
 		TimerDurationSeconds: timerDuration,
+		VotingEnabled:        input.VotingEnabled,
+		VotingMode:           votingMode,
 		CreatedAt:            time.Now(),
 	}
 
@@ -1394,4 +1409,338 @@ func (s *LobbyService) GetTeamStats(ctx context.Context, lobbyID uuid.UUID) (*Te
 	}
 
 	return stats, nil
+}
+
+// ==================== Voting ====================
+
+// CastVote allows a player to vote for a match option
+func (s *LobbyService) CastVote(ctx context.Context, lobbyID, userID uuid.UUID, optionNumber int) (*domain.VotingStatus, error) {
+	lobby, err := s.lobbyRepo.GetByID(ctx, lobbyID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrLobbyNotFound
+		}
+		return nil, err
+	}
+
+	if !lobby.VotingEnabled {
+		return nil, ErrVotingNotEnabled
+	}
+
+	if lobby.Status != domain.LobbyStatusMatchmaking {
+		return nil, ErrInvalidLobbyState
+	}
+
+	// Verify user is in lobby
+	_, err = s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, lobbyID, userID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotInLobby
+		}
+		return nil, err
+	}
+
+	// Verify the option exists
+	_, err = s.matchOptionRepo.GetByLobbyIDAndNumber(ctx, lobbyID, optionNumber)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrInvalidMatchOption
+		}
+		return nil, err
+	}
+
+	// Check if user already voted
+	existingVote, err := s.voteRepo.GetByLobbyAndUser(ctx, lobbyID, userID)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	if existingVote != nil {
+		// Update existing vote
+		existingVote.MatchOptionNum = optionNumber
+		existingVote.UpdatedAt = time.Now()
+		if err := s.voteRepo.Update(ctx, existingVote); err != nil {
+			return nil, err
+		}
+	} else {
+		// Create new vote
+		vote := &domain.Vote{
+			ID:             uuid.New(),
+			LobbyID:        lobbyID,
+			UserID:         userID,
+			MatchOptionNum: optionNumber,
+			CreatedAt:      time.Now(),
+			UpdatedAt:      time.Now(),
+		}
+		if err := s.voteRepo.Create(ctx, vote); err != nil {
+			return nil, err
+		}
+	}
+
+	return s.GetVotingStatus(ctx, lobbyID, &userID)
+}
+
+// GetVotingStatus returns the current voting state for a lobby
+func (s *LobbyService) GetVotingStatus(ctx context.Context, lobbyID uuid.UUID, userID *uuid.UUID) (*domain.VotingStatus, error) {
+	lobby, err := s.lobbyRepo.GetByID(ctx, lobbyID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrLobbyNotFound
+		}
+		return nil, err
+	}
+
+	// Get player count
+	players, err := s.lobbyPlayerRepo.GetByLobbyID(ctx, lobbyID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build map of user IDs to display names
+	userDisplayNames := make(map[uuid.UUID]string)
+	for _, p := range players {
+		if p.User != nil {
+			userDisplayNames[p.UserID] = p.User.DisplayName
+		}
+	}
+
+	// Get vote counts
+	voteCounts, err := s.voteRepo.GetVoteCounts(ctx, lobbyID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get all votes to count total
+	votes, err := s.voteRepo.GetVotesByLobby(ctx, lobbyID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build voters map (option number -> list of voters)
+	voters := make(map[int][]domain.VoterInfo)
+	for _, v := range votes {
+		displayName := userDisplayNames[v.UserID]
+		if displayName == "" {
+			displayName = "Unknown"
+		}
+		voters[v.MatchOptionNum] = append(voters[v.MatchOptionNum], domain.VoterInfo{
+			UserID:      v.UserID,
+			DisplayName: displayName,
+		})
+	}
+
+	status := &domain.VotingStatus{
+		VotingEnabled: lobby.VotingEnabled,
+		VotingMode:    lobby.VotingMode,
+		Deadline:      lobby.VotingDeadline,
+		TotalPlayers:  len(players),
+		VotesCast:     len(votes),
+		VoteCounts:    voteCounts,
+		Voters:        voters,
+	}
+
+	// Get user's vote if userID provided
+	if userID != nil {
+		for _, v := range votes {
+			if v.UserID == *userID {
+				status.UserVote = &v.MatchOptionNum
+				break
+			}
+		}
+	}
+
+	// Calculate winning option based on voting mode
+	status.WinningOption, status.CanFinalize = s.calculateVotingResult(lobby, len(players), voteCounts, len(votes))
+
+	return status, nil
+}
+
+// calculateVotingResult determines the winning option based on voting mode
+func (s *LobbyService) calculateVotingResult(lobby *domain.Lobby, totalPlayers int, voteCounts map[int]int, totalVotes int) (*int, bool) {
+	if totalVotes == 0 {
+		return nil, false
+	}
+
+	// Find option with most votes
+	var maxVotes int
+	var winningOption *int
+	var tiedOptions []int
+
+	for optionNum, count := range voteCounts {
+		if count > maxVotes {
+			maxVotes = count
+			opt := optionNum
+			winningOption = &opt
+			tiedOptions = []int{optionNum}
+		} else if count == maxVotes {
+			tiedOptions = append(tiedOptions, optionNum)
+		}
+	}
+
+	// Handle ties - lowest option number wins
+	if len(tiedOptions) > 1 {
+		minOption := tiedOptions[0]
+		for _, opt := range tiedOptions[1:] {
+			if opt < minOption {
+				minOption = opt
+			}
+		}
+		winningOption = &minOption
+	}
+
+	// Determine if can finalize based on voting mode
+	var canFinalize bool
+	switch lobby.VotingMode {
+	case domain.VotingModeMajority:
+		// Need more than 50% of total players
+		canFinalize = maxVotes > totalPlayers/2
+	case domain.VotingModeUnanimous:
+		// All votes must be for the same option
+		canFinalize = maxVotes == totalVotes && totalVotes == totalPlayers
+	case domain.VotingModeCaptainOverride:
+		// Captain can force, but show if majority is reached
+		canFinalize = maxVotes > totalPlayers/2
+	default:
+		canFinalize = maxVotes > totalPlayers/2
+	}
+
+	return winningOption, canFinalize
+}
+
+// StartVoting enables voting on a lobby (captain only)
+func (s *LobbyService) StartVoting(ctx context.Context, lobbyID, userID uuid.UUID, durationSeconds int) error {
+	lobby, err := s.lobbyRepo.GetByID(ctx, lobbyID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrLobbyNotFound
+		}
+		return err
+	}
+
+	// Verify user is a captain
+	player, err := s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, lobbyID, userID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrNotInLobby
+		}
+		return err
+	}
+	if !player.IsCaptain {
+		return ErrNotCaptain
+	}
+
+	if lobby.Status != domain.LobbyStatusMatchmaking {
+		return ErrInvalidLobbyState
+	}
+
+	// Clear any existing votes
+	if err := s.voteRepo.DeleteByLobby(ctx, lobbyID); err != nil {
+		return err
+	}
+
+	// Set voting deadline if duration provided
+	lobby.VotingEnabled = true
+	if durationSeconds > 0 {
+		deadline := time.Now().Add(time.Duration(durationSeconds) * time.Second)
+		lobby.VotingDeadline = &deadline
+	}
+
+	return s.lobbyRepo.Update(ctx, lobby)
+}
+
+// EndVoting ends voting and applies the winning option (captain only)
+func (s *LobbyService) EndVoting(ctx context.Context, lobbyID, userID uuid.UUID, forceOption *int) (*domain.Lobby, error) {
+	lobby, err := s.lobbyRepo.GetByID(ctx, lobbyID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrLobbyNotFound
+		}
+		return nil, err
+	}
+
+	// Verify user is a captain
+	player, err := s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, lobbyID, userID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotInLobby
+		}
+		return nil, err
+	}
+	if !player.IsCaptain {
+		return nil, ErrNotCaptain
+	}
+
+	if lobby.Status != domain.LobbyStatusMatchmaking {
+		return nil, ErrInvalidLobbyState
+	}
+
+	if !lobby.VotingEnabled {
+		return nil, ErrVotingNotEnabled
+	}
+
+	// Get voting status to determine winner
+	voteCounts, err := s.voteRepo.GetVoteCounts(ctx, lobbyID)
+	if err != nil {
+		return nil, err
+	}
+
+	votes, err := s.voteRepo.GetVotesByLobby(ctx, lobbyID)
+	if err != nil {
+		return nil, err
+	}
+
+	players, err := s.lobbyPlayerRepo.GetByLobbyID(ctx, lobbyID)
+	if err != nil {
+		return nil, err
+	}
+
+	var optionToApply int
+
+	if forceOption != nil && lobby.VotingMode == domain.VotingModeCaptainOverride {
+		// Captain can force any option in captain_override mode
+		optionToApply = *forceOption
+	} else {
+		// Use the winning option
+		winningOption, canFinalize := s.calculateVotingResult(lobby, len(players), voteCounts, len(votes))
+
+		if !canFinalize && lobby.VotingMode != domain.VotingModeCaptainOverride {
+			return nil, errors.New("voting criteria not met")
+		}
+
+		if winningOption == nil {
+			return nil, errors.New("no winning option determined")
+		}
+
+		optionToApply = *winningOption
+	}
+
+	// Verify the option exists
+	_, err = s.matchOptionRepo.GetByLobbyIDAndNumber(ctx, lobbyID, optionToApply)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrInvalidMatchOption
+		}
+		return nil, err
+	}
+
+	// Apply the match option
+	if err := s.applyMatchOption(ctx, lobbyID, optionToApply); err != nil {
+		return nil, err
+	}
+
+	// Clear voting state
+	lobby.VotingEnabled = false
+	lobby.VotingDeadline = nil
+
+	// Clean up votes
+	if err := s.voteRepo.DeleteByLobby(ctx, lobbyID); err != nil {
+		return nil, err
+	}
+
+	return s.lobbyRepo.GetByID(ctx, lobbyID)
+}
+
+// RemovePlayerVote removes a player's vote when they leave the lobby
+func (s *LobbyService) RemovePlayerVote(ctx context.Context, lobbyID, userID uuid.UUID) error {
+	return s.voteRepo.DeleteByLobbyAndUser(ctx, lobbyID, userID)
 }
