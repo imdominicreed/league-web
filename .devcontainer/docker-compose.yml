@@ -19,6 +19,8 @@ services:
         USER_GID: ${USER_GID:-1000}
     volumes:
       - ..:/workspaces/project:cached
+      # Mount main .git at same path for worktree support
+      - ${MAIN_GIT_DIR}:${MAIN_GIT_DIR}:cached
       - ${CHEZMOI_SOURCE:-~/.local/share/chezmoi}:/home/dev/.local/share/chezmoi:ro
       - ~/.claude:/home/dev/.claude
       - ~/.ssh:/home/dev/.ssh:ro
