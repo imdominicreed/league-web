@@ -1,0 +1,31 @@
+{
+  "name": "League Draft Dev",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "dev",
+  "workspaceFolder": "/workspaces/league-draft-website",
+
+  "mounts": [
+    "source=${localEnv:HOME}/.local/share/chezmoi,target=/home/dev/.local/share/chezmoi,type=bind,readonly",
+    "source=${localEnv:HOME}/.claude,target=/home/dev/.claude,type=bind",
+    "source=${localEnv:HOME}/.ssh,target=/home/dev/.ssh,type=bind,readonly",
+    "source=${localEnv:HOME}/.config/gh,target=/home/dev/.config/gh,type=bind,readonly",
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
+  ],
+
+  "postCreateCommand": ".devcontainer/post-create.sh",
+
+  "remoteUser": "dev",
+
+  "containerEnv": {
+    "SHELL": "/usr/bin/fish"
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go",
+        "dbaeumer.vscode-eslint"
+      ]
+    }
+  }
+}

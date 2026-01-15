@@ -22,6 +22,7 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: 3000,
+      allowedHosts: ['.dev.local'],
       proxy: {
         '/api': {
           target: apiUrl,

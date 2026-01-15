@@ -1,0 +1,85 @@
+# League Draft Dev Container
+#
+# Prerequisites: Start Traefik first:
+#   docker compose -f ~/.local/share/chezmoi/docker/traefik/docker-compose.yml up -d
+#
+# Access:
+#   Frontend: http://league-draft-website.dev.local:3000
+#   Backend:  http://league-draft-website.dev.local:9999
+#
+# Add to /etc/hosts: 127.0.0.1 *.dev.local (or use Acrylic DNS on Windows)
+
+name: league-draft-website
+
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        USER_UID: ${USER_UID:-1000}
+        USER_GID: ${USER_GID:-1000}
+    volumes:
+      - ..:/workspaces/league-draft-website:cached
+      - ${CHEZMOI_SOURCE:-~/.local/share/chezmoi}:/home/dev/.local/share/chezmoi:ro
+      - ~/.claude:/home/dev/.claude
+      - ~/.ssh:/home/dev/.ssh:ro
+      - ~/.config/gh:/home/dev/.config/gh:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - go-mod-cache:/home/dev/go/pkg/mod
+      - npm-cache:/home/dev/.npm
+    environment:
+      PORT: "9999"
+      VITE_API_URL: "http://${COMPOSE_PROJECT_NAME:-league-draft}.dev.local:9999"
+      ENVIRONMENT: development
+      DATABASE_URL: postgres://postgres:postgres@db:5432/league_draft?sslmode=disable
+      JWT_SECRET: dev-container-jwt-secret
+      JWT_EXPIRATION_HOURS: "24"
+      DEFAULT_TIMER_SECONDS: "30"
+      TERM: xterm-256color
+      COLORTERM: truecolor
+      PATH: "/home/dev/.local/bin:/home/dev/.local/share/fnm:/home/dev/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    stdin_open: true
+    tty: true
+    command: sleep infinity
+    networks:
+      - traefik-dev
+      - default
+    labels:
+      - "traefik.enable=true"
+      # Frontend routing (npm run dev on port 3000)
+      - "traefik.http.routers.league-draft-frontend.rule=Host(`league-draft-website.dev.local`)"
+      - "traefik.http.routers.league-draft-frontend.entrypoints=port3000"
+      - "traefik.http.routers.league-draft-frontend.service=league-draft-frontend"
+      - "traefik.http.services.league-draft-frontend.loadbalancer.server.port=3000"
+      # Backend routing (go run on port 9999)
+      - "traefik.http.routers.league-draft-backend.rule=Host(`league-draft-website.dev.local`)"
+      - "traefik.http.routers.league-draft-backend.entrypoints=port9999"
+      - "traefik.http.routers.league-draft-backend.service=league-draft-backend"
+      - "traefik.http.services.league-draft-backend.loadbalancer.server.port=9999"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: league_draft
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+networks:
+  traefik-dev:
+    external: true
+
+volumes:
+  go-mod-cache:
+  npm-cache:
+  postgres-data:

@@ -1,4 +1,4 @@
-.PHONY: help dev dev-backend dev-frontend db db-stop db-clean build test lint clean docker-up docker-down sync-champions
+.PHONY: help dev dev-backend dev-frontend db db-stop db-clean build test lint clean docker-up docker-down sync-champions dc-build dc-up dc-down dc-shell dc-setup dc-logs dc-clean
 
 # Load environment variables from .env file
 include .env
@@ -15,6 +15,14 @@ help:
 	@echo "  make db            - Start PostgreSQL database"
 	@echo "  make db-stop       - Stop PostgreSQL database"
 	@echo "  make db-clean      - Remove database volume (fresh start)"
+	@echo ""
+	@echo "Dev Container (isolated env with your dotfiles):"
+	@echo "  make dc-build      - Build dev container image"
+	@echo "  make dc-up         - Start dev container + postgres"
+	@echo "  make dc-shell      - Attach to dev container (runs setup on first use)"
+	@echo "  make dc-down       - Stop dev container"
+	@echo "  make dc-logs       - View container logs"
+	@echo "  make dc-clean      - Remove containers and volumes"
 	@echo ""
 	@echo "Lobby Simulator:"
 	@echo "  make dev-lobby     - Create 10-player lobby ready for draft"
@@ -42,7 +50,7 @@ dev-backend:
 
 dev-frontend:
 	@echo "Starting React dev server..."
-	cd frontend && npm run dev
+	cd frontend && npm run dev -- --host 0.0.0.0
 
 dev:
 	@echo "Starting development servers..."
@@ -127,3 +135,42 @@ dev-lobby: simulator-build
 dev-lobby-populate: simulator-build
 	@echo "Usage: make dev-lobby-populate LOBBY=<code> COUNT=9"
 	./bin/simulator populate --lobby=$(LOBBY) --count=$(COUNT)
+
+# Dev container commands (isolated environment with chezmoi dotfiles)
+DC_COMPOSE = docker compose -f .devcontainer/docker-compose.yml
+DC_SETUP_MARKER = .devcontainer/.setup-done
+
+dc-build:
+	@echo "Building dev container..."
+	$(DC_COMPOSE) build
+
+dc-up:
+	@echo "Starting dev container..."
+	$(DC_COMPOSE) up -d
+
+dc-down:
+	@echo "Stopping dev container..."
+	$(DC_COMPOSE) down
+
+dc-shell: dc-up
+	@if [ ! -f $(DC_SETUP_MARKER) ]; then \
+		echo "First run - setting up environment..."; \
+		$(DC_COMPOSE) exec dev /workspace/.devcontainer/post-create.sh; \
+		touch $(DC_SETUP_MARKER); \
+	fi
+	@echo "Attaching to dev container..."
+	$(DC_COMPOSE) exec dev bash
+
+dc-setup:
+	@echo "Running setup in dev container..."
+	$(DC_COMPOSE) exec dev /workspace/.devcontainer/post-create.sh
+	@touch $(DC_SETUP_MARKER)
+
+dc-logs:
+	$(DC_COMPOSE) logs -f
+
+dc-clean:
+	@echo "Removing dev container and volumes..."
+	$(DC_COMPOSE) down -v
+	@rm -f $(DC_SETUP_MARKER)
+	@echo "Cleaned dev container resources"
