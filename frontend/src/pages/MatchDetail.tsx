@@ -5,6 +5,8 @@ import { RootState, AppDispatch } from '@/store'
 import { fetchChampions } from '@/store/slices/championsSlice'
 import { matchHistoryApi } from '@/api/matchHistory'
 import { MatchDetail as MatchDetailType } from '@/types'
+import DraftTimeline from '@/components/match-history/DraftTimeline'
+import TeamComposition from '@/components/match-history/TeamComposition'
 
 export default function MatchDetail() {
   const { roomId } = useParams<{ roomId: string }>()
@@ -42,6 +44,24 @@ export default function MatchDetail() {
     }
   }
 
+  const formatDate = (dateStr: string) => {
+    const date = new Date(dateStr)
+    return date.toLocaleDateString('en-US', {
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
+
+  const getSideBadge = (side: string) => {
+    if (side === 'blue') return <span className="text-xs bg-lol-blue text-black px-2 py-0.5 rounded">Blue Side</span>
+    if (side === 'red') return <span className="text-xs bg-red-500 text-white px-2 py-0.5 rounded">Red Side</span>
+    return <span className="text-xs bg-gray-600 text-white px-2 py-0.5 rounded">Spectator</span>
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-lol-dark flex items-center justify-center">
@@ -68,12 +88,26 @@ export default function MatchDetail() {
 
   return (
     <div className="min-h-screen bg-lol-dark p-6">
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-5xl mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-3xl font-bold text-lol-gold">Match Detail</h1>
-            <p className="text-gray-400 mt-1">#{match.shortCode}</p>
+            <div className="flex items-center gap-3 mb-2">
+              <h1 className="text-3xl font-bold text-lol-gold">Match Detail</h1>
+              {getSideBadge(match.yourSide)}
+              {match.isTeamDraft && (
+                <span className="text-xs bg-purple-600 text-white px-2 py-0.5 rounded">
+                  Team Draft
+                </span>
+              )}
+            </div>
+            <p className="text-gray-400">
+              <span className="font-mono text-sm">#{match.shortCode}</span>
+              <span className="mx-2">•</span>
+              <span className="capitalize">{match.draftMode.replace('_', ' ')}</span>
+              <span className="mx-2">•</span>
+              {match.timerDurationSeconds}s timer
+            </p>
           </div>
           <Link
             to="/match-history"
@@ -83,13 +117,33 @@ export default function MatchDetail() {
           </Link>
         </div>
 
-        {/* Match detail content will be implemented in Phase 5 */}
-        <div className="bg-gray-800 rounded-lg p-6">
-          <p className="text-gray-400">Match detail view coming soon...</p>
-          <pre className="mt-4 text-xs text-gray-500 overflow-auto">
-            {JSON.stringify(match, null, 2)}
-          </pre>
+        {/* Timestamps */}
+        {match.completedAt && (
+          <div className="mb-6 text-sm text-gray-400">
+            Completed {formatDate(match.completedAt)}
+          </div>
+        )}
+
+        {/* Team Compositions */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          <TeamComposition
+            side="blue"
+            picks={match.bluePicks}
+            bans={match.blueBans}
+            players={match.blueTeam}
+            isTeamDraft={match.isTeamDraft}
+          />
+          <TeamComposition
+            side="red"
+            picks={match.redPicks}
+            bans={match.redBans}
+            players={match.redTeam}
+            isTeamDraft={match.isTeamDraft}
+          />
         </div>
+
+        {/* Draft Timeline */}
+        <DraftTimeline actions={match.actions} />
       </div>
     </div>
   )
