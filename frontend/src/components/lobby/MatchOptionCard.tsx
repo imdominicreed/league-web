@@ -147,11 +147,12 @@ export function MatchOptionCard({
 
       {/* Voters list */}
       {isVotingEnabled && voters && voters.length > 0 && (
-        <div className="mb-3 flex flex-wrap gap-1">
+        <div data-testid={`voters-option-${option.optionNumber}`} className="mb-3 flex flex-wrap gap-1">
           {voters.map((voter) => (
             <span
               key={voter.userId}
               className="bg-purple-600/20 text-purple-300 px-2 py-0.5 rounded text-xs"
+              data-testid={`voter-${voter.userId}`}
             >
               {voter.displayName}
             </span>

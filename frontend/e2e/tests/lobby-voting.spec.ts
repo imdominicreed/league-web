@@ -346,16 +346,16 @@ test.describe('Lobby Voting Voters Display', () => {
     await users[5].page.reload();
     await expect(users[5].page.locator('text=Vote for Team Composition')).toBeVisible({ timeout: TIMEOUTS.MEDIUM });
 
-    // Option 1 should show first 3 users' names
-    const option1Card = users[5].page.locator('[data-testid="match-option-1"]');
+    // Option 1 voters section should show first 3 users' names
+    const voters1 = users[5].page.locator('[data-testid="voters-option-1"]');
     for (let i = 0; i < 3; i++) {
-      await expect(option1Card.locator(`text=${users[i].user.displayName}`)).toBeVisible();
+      await expect(voters1.locator(`text=${users[i].user.displayName}`)).toBeVisible();
     }
 
-    // Option 2 should show users 3 and 4's names
-    const option2Card = users[5].page.locator('[data-testid="match-option-2"]');
+    // Option 2 voters section should show users 3 and 4's names
+    const voters2 = users[5].page.locator('[data-testid="voters-option-2"]');
     for (let i = 3; i < 5; i++) {
-      await expect(option2Card.locator(`text=${users[i].user.displayName}`)).toBeVisible();
+      await expect(voters2.locator(`text=${users[i].user.displayName}`)).toBeVisible();
     }
   });
 
@@ -387,9 +387,9 @@ test.describe('Lobby Voting Voters Display', () => {
     await users[1].page.reload();
     await expect(users[1].page.locator('text=Vote for Team Composition')).toBeVisible({ timeout: TIMEOUTS.MEDIUM });
 
-    // User 0's name should be visible on option 1
-    const option1Card = users[1].page.locator('[data-testid="match-option-1"]');
-    await expect(option1Card.locator(`text=${users[0].user.displayName}`)).toBeVisible();
+    // User 0's name should be visible in option 1's voters section
+    const voters1Before = users[1].page.locator('[data-testid="voters-option-1"]');
+    await expect(voters1Before.locator(`text=${users[0].user.displayName}`)).toBeVisible();
 
     // User 0 changes vote to option 2
     await users[0].page.reload();
@@ -400,12 +400,13 @@ test.describe('Lobby Voting Voters Display', () => {
     await users[1].page.reload();
     await expect(users[1].page.locator('text=Vote for Team Composition')).toBeVisible({ timeout: TIMEOUTS.MEDIUM });
 
-    // User 0's name should now be on option 2, not option 1
-    const option1CardAfter = users[1].page.locator('[data-testid="match-option-1"]');
-    const option2Card = users[1].page.locator('[data-testid="match-option-2"]');
+    // User 0's name should now be in option 2's voters section, not option 1's
+    const voters1After = users[1].page.locator('[data-testid="voters-option-1"]');
+    const voters2 = users[1].page.locator('[data-testid="voters-option-2"]');
 
-    await expect(option1CardAfter.locator(`text=${users[0].user.displayName}`)).not.toBeVisible();
-    await expect(option2Card.locator(`text=${users[0].user.displayName}`)).toBeVisible();
+    // Option 1 voters section should either not exist or not contain user 0's name
+    await expect(voters1After.locator(`text=${users[0].user.displayName}`)).not.toBeVisible();
+    await expect(voters2.locator(`text=${users[0].user.displayName}`)).toBeVisible();
   });
 });
 

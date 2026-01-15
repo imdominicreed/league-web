@@ -140,16 +140,22 @@ type EndVotingRequest struct {
 	ForceOption *int `json:"forceOption,omitempty"`
 }
 
+type VoterInfoResponse struct {
+	UserID      string `json:"userId"`
+	DisplayName string `json:"displayName"`
+}
+
 type VotingStatusResponse struct {
-	VotingEnabled bool           `json:"votingEnabled"`
-	VotingMode    string         `json:"votingMode"`
-	Deadline      *string        `json:"deadline,omitempty"`
-	TotalPlayers  int            `json:"totalPlayers"`
-	VotesCast     int            `json:"votesCast"`
-	VoteCounts    map[int]int    `json:"voteCounts"`
-	UserVote      *int           `json:"userVote,omitempty"`
-	WinningOption *int           `json:"winningOption,omitempty"`
-	CanFinalize   bool           `json:"canFinalize"`
+	VotingEnabled bool                        `json:"votingEnabled"`
+	VotingMode    string                      `json:"votingMode"`
+	Deadline      *string                     `json:"deadline,omitempty"`
+	TotalPlayers  int                         `json:"totalPlayers"`
+	VotesCast     int                         `json:"votesCast"`
+	VoteCounts    map[int]int                 `json:"voteCounts"`
+	Voters        map[int][]VoterInfoResponse `json:"voters"`
+	UserVote      *int                        `json:"userVote,omitempty"`
+	WinningOption *int                        `json:"winningOption,omitempty"`
+	CanFinalize   bool                        `json:"canFinalize"`
 }
 
 type StartDraftResponse struct {
@@ -1203,6 +1209,19 @@ func toVotingStatusResponse(status *domain.VotingStatus) VotingStatusResponse {
 		voteCounts = make(map[int]int)
 	}
 
+	// Convert domain voters to response voters
+	voters := make(map[int][]VoterInfoResponse)
+	for optionNum, voterList := range status.Voters {
+		voterResponses := make([]VoterInfoResponse, len(voterList))
+		for i, v := range voterList {
+			voterResponses[i] = VoterInfoResponse{
+				UserID:      v.UserID.String(),
+				DisplayName: v.DisplayName,
+			}
+		}
+		voters[optionNum] = voterResponses
+	}
+
 	return VotingStatusResponse{
 		VotingEnabled: status.VotingEnabled,
 		VotingMode:    string(status.VotingMode),
@@ -1210,6 +1229,7 @@ func toVotingStatusResponse(status *domain.VotingStatus) VotingStatusResponse {
 		TotalPlayers:  status.TotalPlayers,
 		VotesCast:     status.VotesCast,
 		VoteCounts:    voteCounts,
+		Voters:        voters,
 		UserVote:      status.UserVote,
 		WinningOption: status.WinningOption,
 		CanFinalize:   status.CanFinalize,
