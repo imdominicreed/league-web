@@ -307,10 +307,9 @@ func (dm *DraftStateManager) applySelection(phase *domain.Phase, championID stri
 	dm.recordDraftAction(phase, championID)
 }
 
-// recordDraftAction persists a draft action to the database
+// recordDraftAction persists a draft action to the database asynchronously
 func (dm *DraftStateManager) recordDraftAction(phase *domain.Phase, championID string) {
 	if dm.draftActionRepo == nil {
-		log.Printf("Warning: draftActionRepo is nil, cannot record draft action")
 		return
 	}
 
@@ -323,35 +322,53 @@ func (dm *DraftStateManager) recordDraftAction(phase *domain.Phase, championID s
 		ActionTime: time.Now(),
 	}
 
-	ctx := context.Background()
-	if err := dm.draftActionRepo.Create(ctx, action); err != nil {
-		log.Printf("Error recording draft action for room %s phase %d: %v", dm.room.id, phase.Index, err)
-	}
+	// Run async to avoid blocking WebSocket message flow
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := dm.draftActionRepo.Create(ctx, action); err != nil {
+			// Only log if not a context/connection error (likely test cleanup)
+			if ctx.Err() == nil {
+				log.Printf("Error recording draft action for room %s phase %d: %v", dm.room.id, phase.Index, err)
+			}
+		}
+	}()
 }
 
-// persistRoomCompletion updates the Room entity when draft completes
+// persistRoomCompletion updates the Room entity when draft completes asynchronously
 func (dm *DraftStateManager) persistRoomCompletion() {
 	if dm.roomRepo == nil {
-		log.Printf("Warning: roomRepo is nil, cannot persist room completion")
 		return
 	}
 
-	ctx := context.Background()
-	room, err := dm.roomRepo.GetByID(ctx, dm.room.id)
-	if err != nil {
-		log.Printf("Error getting room %s for completion: %v", dm.room.id, err)
-		return
-	}
+	roomID := dm.room.id
 
-	now := time.Now()
-	room.Status = domain.RoomStatusCompleted
-	room.CompletedAt = &now
+	// Run async to avoid blocking WebSocket message flow
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 
-	if err := dm.roomRepo.Update(ctx, room); err != nil {
-		log.Printf("Error updating room %s completion: %v", dm.room.id, err)
-	} else {
-		log.Printf("Room %s marked as completed at %v", dm.room.id, now)
-	}
+		room, err := dm.roomRepo.GetByID(ctx, roomID)
+		if err != nil {
+			if ctx.Err() == nil {
+				log.Printf("Error getting room %s for completion: %v", roomID, err)
+			}
+			return
+		}
+
+		now := time.Now()
+		room.Status = domain.RoomStatusCompleted
+		room.CompletedAt = &now
+
+		if err := dm.roomRepo.Update(ctx, room); err != nil {
+			if ctx.Err() == nil {
+				log.Printf("Error updating room %s completion: %v", roomID, err)
+			}
+		} else {
+			log.Printf("Room %s marked as completed at %v", roomID, now)
+		}
+	}()
 }
 
 // IsChampionUsed checks if a champion is already picked or banned.

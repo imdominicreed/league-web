@@ -436,7 +436,6 @@ func (r *Room) handleLockIn(client *Client) {
 	if championID == nil {
 		none := "None"
 		championID = &none
-
 	}
 
 	// Apply the selection
