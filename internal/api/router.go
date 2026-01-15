@@ -33,6 +33,7 @@ func NewRouter(services *service.Services, hub *websocket.Hub, repos *repository
 	championHandler := handlers.NewChampionHandler(services.Champion)
 	profileHandler := handlers.NewProfileHandler(services.Profile)
 	lobbyHandler := handlers.NewLobbyHandler(services.Lobby, services.Matchmaking, hub)
+	matchHistoryHandler := handlers.NewMatchHistoryHandler(repos.Room, repos.DraftState, repos.DraftAction, repos.RoomPlayer)
 	wsHandler := handlers.NewWebSocketHandler(hub, services.Auth)
 
 	// API v1 routes
@@ -80,6 +81,12 @@ func NewRouter(services *service.Services, hub *websocket.Hub, repos *repository
 				r.Get("/roles", profileHandler.GetRoleProfiles)
 				r.Put("/roles/{role}", profileHandler.UpdateRoleProfile)
 				r.Post("/roles/initialize", profileHandler.InitializeProfiles)
+			})
+
+			// Match history routes
+			r.Route("/match-history", func(r chi.Router) {
+				r.Get("/", matchHistoryHandler.List)
+				r.Get("/{roomId}", matchHistoryHandler.GetDetail)
 			})
 
 			// Lobby routes

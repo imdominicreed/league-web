@@ -27,6 +27,8 @@ type RoomRepository interface {
 	GetByShortCode(ctx context.Context, code string) (*domain.Room, error)
 	Update(ctx context.Context, room *domain.Room) error
 	GetByUserID(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.Room, error)
+	GetCompletedByUserID(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.Room, error)
+	GetByIDWithDraftState(ctx context.Context, id uuid.UUID) (*domain.Room, *domain.DraftState, error)
 }
 
 type DraftStateRepository interface {
