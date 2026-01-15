@@ -121,15 +121,15 @@ export class LobbyRoomPage extends BasePage {
   }
 
   async expectPendingActionBanner() {
-    await expect(this.page.locator('.bg-yellow-900\\/30')).toBeVisible();
+    await expect(this.page.locator('[data-testid="pending-action-banner"]')).toBeVisible({ timeout: TIMEOUTS.MEDIUM });
   }
 
   async clickApprovePendingAction() {
-    await this.page.click('button:has-text("Approve")');
+    await this.page.locator('[data-testid="pending-action-approve-button"]').click();
   }
 
   async clickCancelPendingAction() {
-    await this.page.click('button:has-text("Cancel")');
+    await this.page.locator('[data-testid="pending-action-cancel-button"]').click();
   }
 
   async expectTeamColumn(side: 'blue' | 'red') {
@@ -199,44 +199,92 @@ export class LobbyRoomPage extends BasePage {
   // ========== Pending Action Verification ==========
 
   async expectNoPendingActionBanner() {
-    await expect(this.page.locator('.bg-yellow-900\\/30')).not.toBeVisible();
+    await expect(this.page.locator('[data-testid="pending-action-banner"]')).not.toBeVisible({ timeout: TIMEOUTS.MEDIUM });
   }
 
   async getPendingActionType(): Promise<string> {
-    const label = this.page.locator('.bg-yellow-900\\/30 .text-yellow-400.font-semibold');
+    const label = this.page.locator('[data-testid="pending-action-type"]');
     return (await label.textContent()) || '';
   }
 
   async expectApproveButton() {
-    await expect(this.page.locator('button:has-text("Approve")')).toBeVisible();
+    await expect(this.page.locator('[data-testid="pending-action-approve-button"]')).toBeVisible({ timeout: TIMEOUTS.MEDIUM });
   }
 
   async expectApprovedBadge() {
-    await expect(this.page.locator('.text-green-400:has-text("Approved")')).toBeVisible();
+    await expect(this.page.locator('[data-testid="pending-action-approved-badge"]')).toBeVisible({ timeout: TIMEOUTS.MEDIUM });
   }
 
   // ========== Player Verification ==========
 
   async expectPlayerOnTeam(displayName: string, team: 'blue' | 'red') {
-    const teamSection = team === 'blue'
-      ? this.page.locator('.bg-blue-900\\/30, [class*="blue"]').first()
-      : this.page.locator('.bg-red-900\\/30, [class*="red"]').first();
-    await expect(teamSection.locator(`text=${displayName}`)).toBeVisible();
+    const teamColumn = this.page.locator(`[data-testid="team-column-${team}"]`);
+    await expect(teamColumn.locator(`text=${displayName}`)).toBeVisible({ timeout: TIMEOUTS.MEDIUM });
   }
 
   async expectPlayerNotInLobby(displayName: string) {
-    const blueTeamColumn = this.page.locator('.bg-blue-900\\/30').filter({ has: this.page.locator('h3') });
-    const redTeamColumn = this.page.locator('.bg-red-900\\/30').filter({ has: this.page.locator('h3') });
+    const blueTeamColumn = this.page.locator('[data-testid="team-column-blue"]');
+    const redTeamColumn = this.page.locator('[data-testid="team-column-red"]');
 
-    await expect(blueTeamColumn.locator(`text=${displayName}`)).not.toBeVisible();
-    await expect(redTeamColumn.locator(`text=${displayName}`)).not.toBeVisible();
+    await expect(blueTeamColumn.locator(`text=${displayName}`)).not.toBeVisible({ timeout: TIMEOUTS.SHORT });
+    await expect(redTeamColumn.locator(`text=${displayName}`)).not.toBeVisible({ timeout: TIMEOUTS.SHORT });
   }
 
   async expectCaptainControls() {
-    await expect(this.page.locator('text=Captain Controls')).toBeVisible();
+    await expect(this.page.locator('text=Captain Controls')).toBeVisible({ timeout: TIMEOUTS.MEDIUM });
   }
 
   async expectPlayerActions() {
-    await expect(this.page.locator('text=Player Actions')).toBeVisible();
+    await expect(this.page.locator('text=Player Actions')).toBeVisible({ timeout: TIMEOUTS.MEDIUM });
+  }
+
+  // ========== WebSocket-Aware Wait Methods ==========
+
+  /**
+   * Wait for the pending action banner to appear after an action.
+   * Uses proper Playwright waiting instead of arbitrary timeouts.
+   */
+  async waitForPendingAction() {
+    await expect(this.page.locator('[data-testid="pending-action-banner"]')).toBeVisible({ timeout: TIMEOUTS.MEDIUM });
+  }
+
+  /**
+   * Wait for approve button to become visible.
+   * Returns true if button appeared, false if timeout.
+   */
+  async waitForApproveButton(): Promise<boolean> {
+    try {
+      await expect(this.page.locator('[data-testid="pending-action-approve-button"]')).toBeVisible({ timeout: TIMEOUTS.MEDIUM });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Check if approve button is visible (non-waiting).
+   */
+  async hasApproveButton(): Promise<boolean> {
+    return await this.page.locator('[data-testid="pending-action-approve-button"]').isVisible().catch(() => false);
+  }
+
+  /**
+   * Wait for lobby page to fully load after navigation.
+   */
+  async waitForLobbyReady() {
+    await expect(this.page.locator('text=10-Man Lobby')).toBeVisible({ timeout: TIMEOUTS.MEDIUM });
+    // Wait for at least one team column
+    await expect(
+      this.page.locator('[data-testid="team-column-blue"]').or(
+        this.page.locator('[data-testid="team-column-red"]')
+      ).first()
+    ).toBeVisible({ timeout: TIMEOUTS.SHORT });
+  }
+
+  /**
+   * Wait for state update after an action by watching for banner state change.
+   */
+  async waitForStateUpdate(checkFn: () => Promise<boolean>) {
+    await expect.poll(checkFn, { timeout: TIMEOUTS.MEDIUM }).toBe(true);
   }
 }

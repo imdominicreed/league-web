@@ -67,6 +67,7 @@ export function TeamColumn({ side, players, currentUserId, swapMode = false, sel
             ? side === 'blue' ? 'border-lol-blue/50' : 'border-lol-red/50'
             : 'border-gray-700'
         }`}
+        data-testid={`lobby-player-${player.userId}`}
       >
         <div className="flex items-center gap-3">
           <div
@@ -97,6 +98,8 @@ export function TeamColumn({ side, players, currentUserId, swapMode = false, sel
               player.isReady ? 'bg-green-500' : 'bg-gray-500'
             }`}
             title={player.isReady ? 'Ready' : 'Not ready'}
+            data-testid="player-ready-status"
+            data-ready={player.isReady}
           />
         </div>
       </div>
@@ -104,7 +107,7 @@ export function TeamColumn({ side, players, currentUserId, swapMode = false, sel
   }
 
   return (
-    <div className={`${sideBg} rounded-lg p-4 border ${sideBorder}`}>
+    <div className={`${sideBg} rounded-lg p-4 border ${sideBorder}`} data-testid={`team-column-${side}`}>
       <h3 className={`text-lg font-bold mb-4 text-${sideColor} capitalize`}>
         {side} Team
         <span className="text-gray-400 text-sm font-normal ml-2">
