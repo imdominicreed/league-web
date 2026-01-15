@@ -1,4 +1,4 @@
-.PHONY: help dev dev-backend dev-frontend db db-stop db-clean build test lint clean docker-up docker-down sync-champions dc-build dc-up dc-down dc-shell dc-setup dc-logs dc-clean
+.PHONY: help dev dev-backend dev-frontend run-all db db-stop db-clean build build-frontend build-all test lint clean docker-up docker-down sync-champions dc-build dc-up dc-down dc-shell dc-setup dc-logs dc-clean
 
 # Load environment variables from .env file
 include .env
@@ -10,6 +10,7 @@ help:
 	@echo ""
 	@echo "Development:"
 	@echo "  make dev           - Start both backend and frontend (requires tmux)"
+	@echo "  make run-all       - Alias for 'make dev'"
 	@echo "  make dev-backend   - Start Go backend server"
 	@echo "  make dev-frontend  - Start React dev server"
 	@echo "  make db            - Start PostgreSQL database"
@@ -31,6 +32,7 @@ help:
 	@echo "Build:"
 	@echo "  make build         - Build Go backend"
 	@echo "  make build-frontend- Build React frontend"
+	@echo "  make build-all     - Build both backend and frontend"
 	@echo "  make simulator-build - Build lobby simulator CLI"
 	@echo ""
 	@echo "Docker:"
@@ -58,6 +60,8 @@ dev:
 	@echo "Frontend: http://localhost:3000"
 	@tmux new-session -d -s league-draft 'make dev-backend' \; split-window -h 'make dev-frontend' \; attach
 
+run-all: dev
+
 # Database
 db:
 	@echo "Starting PostgreSQL..."
@@ -81,6 +85,9 @@ build:
 build-frontend:
 	@echo "Building React frontend..."
 	cd frontend && npm run build
+
+build-all: build build-frontend
+	@echo "Build complete: backend and frontend"
 
 # Docker
 docker-up:
