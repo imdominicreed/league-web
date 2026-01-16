@@ -291,3 +291,51 @@ export interface StateSyncPayload {
   spectatorCount: number
   fearlessBans?: string[]
 }
+
+// Match History types
+export interface MatchPlayer {
+  userId: string
+  displayName: string
+  assignedRole: Role
+  isCaptain: boolean
+}
+
+export interface MatchHistoryItem {
+  id: string
+  shortCode: string
+  draftMode: 'pro_play' | 'fearless'
+  completedAt: string
+  isTeamDraft: boolean
+  yourSide: Side
+  bluePicks: string[]
+  redPicks: string[]
+  blueTeam?: MatchPlayer[]
+  redTeam?: MatchPlayer[]
+}
+
+export interface DraftAction {
+  phaseIndex: number
+  team: 'blue' | 'red'
+  actionType: 'ban' | 'pick'
+  championId: string
+  actionTime: string
+}
+
+export interface MatchDetail {
+  id: string
+  shortCode: string
+  draftMode: 'pro_play' | 'fearless'
+  timerDurationSeconds: number
+  createdAt: string
+  startedAt?: string
+  completedAt?: string
+  isTeamDraft: boolean
+  yourSide: Side
+  bluePicks: string[]
+  redPicks: string[]
+  blueBans: string[]
+  redBans: string[]
+  blueTeam?: MatchPlayer[]
+  redTeam?: MatchPlayer[]
+  actions: DraftAction[]
+}

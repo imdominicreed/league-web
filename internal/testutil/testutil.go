@@ -162,7 +162,7 @@ func NewTestServer(t *testing.T) *TestServer {
 	cfg := TestConfig()
 
 	repos := repoPostgres.NewRepositories(testDB.DB)
-	hub := websocket.NewHub(repos.User, repos.RoomPlayer, repos.Champion)
+	hub := websocket.NewHub(repos.User, repos.RoomPlayer, repos.Champion, repos.Room, repos.DraftAction)
 	go hub.Run()
 
 	services := service.NewServices(repos, cfg)

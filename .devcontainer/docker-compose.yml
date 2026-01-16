@@ -11,6 +11,7 @@
 
 services:
   dev:
+    env_file: .env
     build:
       context: .
       dockerfile: Dockerfile
@@ -20,7 +21,7 @@ services:
     volumes:
       - ..:/workspaces/project:cached
       # Mount main .git at same path for worktree support
-      - ${MAIN_GIT_DIR}:${MAIN_GIT_DIR}:cached
+      - ${MAIN_GIT_DIR:-/tmp/empty}:${MAIN_GIT_DIR:-/tmp/empty}:cached
       - ${CHEZMOI_SOURCE:-~/.local/share/chezmoi}:/home/dev/.local/share/chezmoi:ro
       - ~/.claude:/home/dev/.claude
       - ~/.claude.json:/home/dev/.claude.json
@@ -51,6 +52,7 @@ services:
       - default
     labels:
       - "traefik.enable=true"
+      - "traefik.docker.network=traefik-dev"
       # Frontend routing (npm run dev on port 3000)
       - "traefik.http.routers.${PROJECT_NAME}-frontend.rule=Host(`${PROJECT_NAME}.dev.local`)"
       - "traefik.http.routers.${PROJECT_NAME}-frontend.entrypoints=port3000"
@@ -61,6 +63,11 @@ services:
       - "traefik.http.routers.${PROJECT_NAME}-backend.entrypoints=port9999"
       - "traefik.http.routers.${PROJECT_NAME}-backend.service=${PROJECT_NAME}-backend"
       - "traefik.http.services.${PROJECT_NAME}-backend.loadbalancer.server.port=9999"
+      # Playwright UI routing (port 7070)
+      - "traefik.http.routers.${PROJECT_NAME}-playwright.rule=Host(`${PROJECT_NAME}.dev.local`)"
+      - "traefik.http.routers.${PROJECT_NAME}-playwright.entrypoints=port7070"
+      - "traefik.http.routers.${PROJECT_NAME}-playwright.service=${PROJECT_NAME}-playwright"
+      - "traefik.http.services.${PROJECT_NAME}-playwright.loadbalancer.server.port=7070"
     depends_on:
       db:
         condition: service_healthy

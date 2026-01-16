@@ -20,6 +20,8 @@ type Room struct {
 	timerDurationMs int
 	userRepo        repository.UserRepository
 	championRepo    repository.ChampionRepository
+	roomRepo        repository.RoomRepository
+	draftActionRepo repository.DraftActionRepository
 
 	// Team draft mode (5v5)
 	isTeamDraft      bool
@@ -85,7 +87,7 @@ type ReadyToResumeRequest struct {
 	Ready  bool
 }
 
-func NewRoom(id uuid.UUID, shortCode string, timerDurationMs int, userRepo repository.UserRepository, championRepo repository.ChampionRepository) *Room {
+func NewRoom(id uuid.UUID, shortCode string, timerDurationMs int, userRepo repository.UserRepository, championRepo repository.ChampionRepository, roomRepo repository.RoomRepository, draftActionRepo repository.DraftActionRepository) *Room {
 	r := &Room{
 		id:               id,
 		shortCode:        shortCode,
@@ -96,6 +98,8 @@ func NewRoom(id uuid.UUID, shortCode string, timerDurationMs int, userRepo repos
 		timerDurationMs:  timerDurationMs,
 		userRepo:         userRepo,
 		championRepo:     championRepo,
+		roomRepo:         roomRepo,
+		draftActionRepo:  draftActionRepo,
 		join:             make(chan *Client),
 		leave:              make(chan *Client),
 		broadcast:          make(chan *Message),
@@ -120,7 +124,7 @@ func NewRoom(id uuid.UUID, shortCode string, timerDurationMs int, userRepo repos
 	r.editMgr = NewEditManager(r)
 
 	// DraftStateManager
-	r.draftMgr = NewDraftStateManager(r, championRepo, timerDurationMs)
+	r.draftMgr = NewDraftStateManager(r, championRepo, roomRepo, draftActionRepo, timerDurationMs)
 
 	return r
 }
@@ -432,7 +436,6 @@ func (r *Room) handleLockIn(client *Client) {
 	if championID == nil {
 		none := "None"
 		championID = &none
-
 	}
 
 	// Apply the selection

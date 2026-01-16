@@ -13,6 +13,8 @@ import Profile from './pages/Profile'
 import CreateLobby from './pages/CreateLobby'
 import JoinLobby from './pages/JoinLobby'
 import LobbyRoom from './pages/LobbyRoom'
+import MatchHistory from './pages/MatchHistory'
+import MatchDetail from './pages/MatchDetail'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useSelector((state: RootState) => state.auth)
@@ -109,6 +111,22 @@ function App() {
           element={
             <ProtectedRoute>
               <LobbyRoom />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/match-history"
+          element={
+            <ProtectedRoute>
+              <MatchHistory />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/match/:roomId"
+          element={
+            <ProtectedRoute>
+              <MatchDetail />
             </ProtectedRoute>
           }
         />

@@ -10,15 +10,17 @@ import (
 )
 
 type Hub struct {
-	rooms          map[string]*Room
-	clients        map[*Client]bool
-	register       chan *Client
-	unregister     chan *Client
-	joinRoom       chan *JoinRoomRequest
-	userRepo       repository.UserRepository
-	roomPlayerRepo repository.RoomPlayerRepository
-	championRepo   repository.ChampionRepository
-	mu             sync.RWMutex
+	rooms           map[string]*Room
+	clients         map[*Client]bool
+	register        chan *Client
+	unregister      chan *Client
+	joinRoom        chan *JoinRoomRequest
+	userRepo        repository.UserRepository
+	roomPlayerRepo  repository.RoomPlayerRepository
+	championRepo    repository.ChampionRepository
+	roomRepo        repository.RoomRepository
+	draftActionRepo repository.DraftActionRepository
+	mu              sync.RWMutex
 }
 
 type JoinRoomRequest struct {
@@ -27,16 +29,18 @@ type JoinRoomRequest struct {
 	Side   string
 }
 
-func NewHub(userRepo repository.UserRepository, roomPlayerRepo repository.RoomPlayerRepository, championRepo repository.ChampionRepository) *Hub {
+func NewHub(userRepo repository.UserRepository, roomPlayerRepo repository.RoomPlayerRepository, championRepo repository.ChampionRepository, roomRepo repository.RoomRepository, draftActionRepo repository.DraftActionRepository) *Hub {
 	return &Hub{
-		rooms:          make(map[string]*Room),
-		clients:        make(map[*Client]bool),
-		register:       make(chan *Client),
-		unregister:     make(chan *Client),
-		joinRoom:       make(chan *JoinRoomRequest),
-		userRepo:       userRepo,
-		roomPlayerRepo: roomPlayerRepo,
-		championRepo:   championRepo,
+		rooms:           make(map[string]*Room),
+		clients:         make(map[*Client]bool),
+		register:        make(chan *Client),
+		unregister:      make(chan *Client),
+		joinRoom:        make(chan *JoinRoomRequest),
+		userRepo:        userRepo,
+		roomPlayerRepo:  roomPlayerRepo,
+		championRepo:    championRepo,
+		roomRepo:        roomRepo,
+		draftActionRepo: draftActionRepo,
 	}
 }
 
@@ -135,7 +139,7 @@ func (h *Hub) CreateRoom(roomID uuid.UUID, shortCode string, timerDurationMs int
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	room := NewRoom(roomID, shortCode, timerDurationMs, h.userRepo, h.championRepo)
+	room := NewRoom(roomID, shortCode, timerDurationMs, h.userRepo, h.championRepo, h.roomRepo, h.draftActionRepo)
 	h.rooms[roomID.String()] = room
 	h.rooms[shortCode] = room
 
