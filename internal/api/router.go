@@ -34,6 +34,7 @@ func NewRouter(services *service.Services, hub *websocket.Hub, repos *repository
 	profileHandler := handlers.NewProfileHandler(services.Profile)
 	lobbyHandler := handlers.NewLobbyHandler(services.Lobby, services.Matchmaking, hub)
 	matchHistoryHandler := handlers.NewMatchHistoryHandler(repos.Room, repos.DraftState, repos.DraftAction, repos.RoomPlayer)
+	simulationHandler := handlers.NewSimulationHandler(repos.Room, repos.DraftState, repos.DraftAction, repos.RoomPlayer, cfg)
 	wsHandler := handlers.NewWebSocketHandler(hub, services.Auth)
 
 	// API v1 routes
@@ -88,6 +89,9 @@ func NewRouter(services *service.Services, hub *websocket.Hub, repos *repository
 				r.Get("/", matchHistoryHandler.List)
 				r.Get("/{roomId}", matchHistoryHandler.GetDetail)
 			})
+
+			// Simulation endpoint (development only)
+			r.Post("/simulate-match", simulationHandler.SimulateMatch)
 
 			// Lobby routes
 			r.Route("/lobbies", func(r chi.Router) {

@@ -83,6 +83,24 @@ func (r *roomRepository) GetCompletedByUserID(ctx context.Context, userID uuid.U
 	return rooms, nil
 }
 
+func (r *roomRepository) GetAllCompleted(ctx context.Context, limit, offset int) ([]*domain.Room, error) {
+	var rooms []*domain.Room
+	err := r.db.WithContext(ctx).
+		Preload("Creator").
+		Preload("BlueSideUser").
+		Preload("RedSideUser").
+		Preload("Players").
+		Where("status = ?", domain.RoomStatusCompleted).
+		Order("completed_at DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&rooms).Error
+	if err != nil {
+		return nil, err
+	}
+	return rooms, nil
+}
+
 func (r *roomRepository) GetByIDWithDraftState(ctx context.Context, id uuid.UUID) (*domain.Room, *domain.DraftState, error) {
 	var room domain.Room
 	err := r.db.WithContext(ctx).

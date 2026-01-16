@@ -28,6 +28,7 @@ type RoomRepository interface {
 	Update(ctx context.Context, room *domain.Room) error
 	GetByUserID(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.Room, error)
 	GetCompletedByUserID(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.Room, error)
+	GetAllCompleted(ctx context.Context, limit, offset int) ([]*domain.Room, error)
 	GetByIDWithDraftState(ctx context.Context, id uuid.UUID) (*domain.Room, *domain.DraftState, error)
 }
 

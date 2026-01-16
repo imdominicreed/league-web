@@ -85,13 +85,9 @@ type DraftActionDTO struct {
 	ActionTime string `json:"actionTime"`
 }
 
-// List returns the user's completed matches
+// List returns all completed matches
 func (h *MatchHistoryHandler) List(w http.ResponseWriter, r *http.Request) {
-	userID, ok := middleware.GetUserID(r.Context())
-	if !ok {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
+	userID, _ := middleware.GetUserID(r.Context())
 
 	// Parse pagination params
 	limit := 20
@@ -107,7 +103,7 @@ func (h *MatchHistoryHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	rooms, err := h.roomRepo.GetCompletedByUserID(r.Context(), userID, limit, offset)
+	rooms, err := h.roomRepo.GetAllCompleted(r.Context(), limit, offset)
 	if err != nil {
 		log.Printf("ERROR [matchHistory.List] failed to get completed rooms: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -123,7 +119,7 @@ func (h *MatchHistoryHandler) List(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// Determine user's side
+		// Determine user's side (if logged in)
 		yourSide := determineSide(userID, room)
 
 		item := MatchHistoryItem{
@@ -154,11 +150,7 @@ func (h *MatchHistoryHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // GetDetail returns full details of a specific completed match
 func (h *MatchHistoryHandler) GetDetail(w http.ResponseWriter, r *http.Request) {
-	userID, ok := middleware.GetUserID(r.Context())
-	if !ok {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
+	userID, _ := middleware.GetUserID(r.Context())
 
 	roomIDStr := chi.URLParam(r, "roomId")
 	roomID, err := uuid.Parse(roomIDStr)
@@ -171,12 +163,6 @@ func (h *MatchHistoryHandler) GetDetail(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		log.Printf("ERROR [matchHistory.GetDetail] failed to get room: %v", err)
 		http.Error(w, "Match not found", http.StatusNotFound)
-		return
-	}
-
-	// Check if user has access to this match
-	if !userHasAccessToRoom(userID, room) {
-		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
 
