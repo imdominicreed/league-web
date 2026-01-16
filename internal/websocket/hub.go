@@ -15,6 +15,9 @@ type Hub struct {
 	register        chan *Client
 	unregister      chan *Client
 	joinRoom        chan *JoinRoomRequest
+	stop            chan struct{}
+	done            chan struct{} // closed when Run() exits
+	stopped         bool
 	userRepo        repository.UserRepository
 	roomPlayerRepo  repository.RoomPlayerRepository
 	championRepo    repository.ChampionRepository
@@ -36,6 +39,8 @@ func NewHub(userRepo repository.UserRepository, roomPlayerRepo repository.RoomPl
 		register:        make(chan *Client),
 		unregister:      make(chan *Client),
 		joinRoom:        make(chan *JoinRoomRequest),
+		stop:            make(chan struct{}),
+		done:            make(chan struct{}),
 		userRepo:        userRepo,
 		roomPlayerRepo:  roomPlayerRepo,
 		championRepo:    championRepo,
@@ -45,29 +50,85 @@ func NewHub(userRepo repository.UserRepository, roomPlayerRepo repository.RoomPl
 }
 
 func (h *Hub) Run() {
+	defer close(h.done) // Signal that Run() has exited
+
 	for {
 		select {
+		case <-h.stop:
+			h.mu.Lock()
+			h.stopped = true
+
+			// Collect unique rooms
+			uniqueRooms := make(map[*Room]bool)
+			for _, room := range h.rooms {
+				uniqueRooms[room] = true
+			}
+
+			// Stop all rooms
+			for room := range uniqueRooms {
+				room.Stop()
+			}
+			h.mu.Unlock()
+
+			// Wait for all rooms to actually exit (without holding the lock)
+			for room := range uniqueRooms {
+				room.Wait()
+			}
+
+			// Now safe to close client channels - no rooms are running
+			h.mu.Lock()
+			for client := range h.clients {
+				client.Close()
+			}
+			h.clients = make(map[*Client]bool)
+			h.rooms = make(map[string]*Room)
+			h.mu.Unlock()
+			return
+
 		case client := <-h.register:
 			h.mu.Lock()
-			h.clients[client] = true
+			if !h.stopped {
+				h.clients[client] = true
+			}
 			h.mu.Unlock()
 
 		case client := <-h.unregister:
 			h.mu.Lock()
-			if _, ok := h.clients[client]; ok {
-				delete(h.clients, client)
-				close(client.send)
+			if !h.stopped {
+				if _, ok := h.clients[client]; ok {
+					delete(h.clients, client)
+					client.Close()
 
-				if client.room != nil {
-					client.room.leave <- client
+					if client.room != nil {
+						client.room.leave <- client
+					}
 				}
 			}
 			h.mu.Unlock()
 
 		case req := <-h.joinRoom:
-			h.handleJoinRoom(req)
+			h.mu.Lock()
+			stopped := h.stopped
+			h.mu.Unlock()
+			if !stopped {
+				h.handleJoinRoom(req)
+			}
 		}
 	}
+}
+
+// Stop gracefully shuts down the hub and all its rooms.
+// It blocks until all rooms have stopped and the hub has fully shut down.
+func (h *Hub) Stop() {
+	h.mu.Lock()
+	if h.stopped {
+		h.mu.Unlock()
+		return
+	}
+	h.mu.Unlock()
+
+	close(h.stop)
+	<-h.done // Wait for Run() to finish
 }
 
 func (h *Hub) handleJoinRoom(req *JoinRoomRequest) {
@@ -165,6 +226,25 @@ func (h *Hub) DeleteRoom(roomID uuid.UUID, shortCode string) {
 
 func (h *Hub) Register(client *Client) {
 	h.register <- client
+}
+
+// Unregister safely unregisters a client, handling the case where the hub may be stopped.
+func (h *Hub) Unregister(client *Client) {
+	h.mu.RLock()
+	stopped := h.stopped
+	h.mu.RUnlock()
+
+	if stopped {
+		// Hub is stopped, just close the connection directly
+		return
+	}
+
+	// Non-blocking send in case Hub is in the process of stopping
+	select {
+	case h.unregister <- client:
+	default:
+		// Hub stopped between check and send - that's ok
+	}
 }
 
 // DraftPendingAction represents a pending action in a draft room for a user

@@ -34,19 +34,9 @@ func (e *EventEmitter) SendTo(client *Client, msg *Message) {
 	client.Send(msg)
 }
 
-// trySend attempts to send to a client, safely handling closed channels.
+// trySend attempts to send to a client using the client's safe send method.
 func (e *EventEmitter) trySend(client *Client, data []byte) {
-	defer func() {
-		if recover() != nil {
-			// Channel closed, client is disconnecting - skip silently
-		}
-	}()
-
-	select {
-	case client.send <- data:
-	default:
-		// Buffer full, skip
-	}
+	client.trySend(data)
 }
 
 // --- Draft lifecycle events ---

@@ -1,4 +1,4 @@
-.PHONY: help dev dev-backend dev-frontend run-all db db-stop db-clean build build-frontend build-all test lint clean docker-up docker-down sync-champions dc-build dc-up dc-down dc-shell dc-setup dc-logs dc-clean
+.PHONY: help dev dev-backend dev-frontend run-all db db-stop db-clean build build-frontend build-all test test-verbose test-stress test-stress-full lint clean docker-up docker-down sync-champions dc-build dc-up dc-down dc-shell dc-setup dc-logs dc-clean
 
 # Load environment variables from .env file
 include .env
@@ -39,9 +39,14 @@ help:
 	@echo "  make docker-up     - Start all services with Docker Compose"
 	@echo "  make docker-down   - Stop all Docker services"
 	@echo ""
+	@echo "Testing:"
+	@echo "  make test          - Run Go tests with race detection"
+	@echo "  make test-verbose  - Run tests with verbose output"
+	@echo "  make test-stress   - Run WebSocket tests 10 times (stress test)"
+	@echo "  make test-stress-full - Run all tests 20 times (full stress test)"
+	@echo ""
 	@echo "Utilities:"
 	@echo "  make sync-champions- Sync champion data from Riot API"
-	@echo "  make test          - Run Go tests"
 	@echo "  make lint          - Run linters"
 	@echo "  make clean         - Clean build artifacts"
 
@@ -107,8 +112,20 @@ sync-champions:
 	curl -X POST http://localhost:$(PORT)/api/v1/champions/sync
 
 test:
-	@echo "Running tests..."
-	go test -v ./...
+	@echo "Running tests with race detection..."
+	go test -race ./...
+
+test-verbose:
+	@echo "Running tests with verbose output..."
+	go test -race -v ./...
+
+test-stress:
+	@echo "Running stress tests (10 iterations)..."
+	go test -race -count=10 ./internal/websocket/...
+
+test-stress-full:
+	@echo "Running full stress tests (20 iterations)..."
+	go test -race -count=20 ./...
 
 lint:
 	@echo "Running linters..."
