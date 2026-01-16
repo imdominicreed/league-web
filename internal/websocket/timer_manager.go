@@ -46,9 +46,10 @@ func (tm *TimerManager) Start() {
 		tm.onExpired()
 	})
 
-	// Start ticker for timer updates
+	// Start ticker for timer updates - pass the stop channel to avoid race
 	tm.tickerStop = make(chan struct{})
-	go tm.runTicker()
+	stopChan := tm.tickerStop // capture a copy for the goroutine
+	go tm.runTicker(stopChan)
 }
 
 // Stop stops the timer and ticker.
@@ -96,10 +97,6 @@ func (tm *TimerManager) Resume() {
 
 	tm.durationMs = tm.frozenMs
 	tm.isPaused = false
-	tm.mu.Unlock()
-
-	// Use Start() which will acquire lock again
-	tm.mu.Lock()
 	tm.timerStarted = time.Now()
 
 	totalDuration := tm.durationMs + bufferDurationMsConst
@@ -108,7 +105,8 @@ func (tm *TimerManager) Resume() {
 	})
 
 	tm.tickerStop = make(chan struct{})
-	go tm.runTicker()
+	stopChan := tm.tickerStop // capture a copy for the goroutine
+	go tm.runTicker(stopChan)
 }
 
 // GetRemaining returns the remaining milliseconds.
@@ -157,13 +155,14 @@ func (tm *TimerManager) GetFrozenMs() int {
 }
 
 // runTicker sends timer tick messages every second.
-func (tm *TimerManager) runTicker() {
+// stopChan is passed as a parameter to avoid race conditions with Stop().
+func (tm *TimerManager) runTicker(stopChan <-chan struct{}) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-tm.tickerStop:
+		case <-stopChan:
 			return
 		case <-ticker.C:
 			tm.mu.RLock()

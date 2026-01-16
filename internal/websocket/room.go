@@ -52,8 +52,11 @@ type Room struct {
 	confirmEdit    chan *Client
 	rejectEdit     chan *Client
 	readyToResume  chan *ReadyToResumeRequest
+	stop    chan struct{}
+	done    chan struct{} // closed when Run() exits
 
-	mu sync.RWMutex
+	mu      sync.RWMutex
+	stopped bool
 }
 
 // ProposeEditRequest contains the client and payload for an edit proposal
@@ -111,6 +114,8 @@ func NewRoom(id uuid.UUID, shortCode string, timerDurationMs int, userRepo repos
 		confirmEdit:        make(chan *Client),
 		rejectEdit:         make(chan *Client),
 		readyToResume:      make(chan *ReadyToResumeRequest),
+		stop:               make(chan struct{}),
+		done:               make(chan struct{}),
 	}
 
 	// Initialize managers
@@ -199,8 +204,18 @@ func (r *Room) getDraftState() *DraftState {
 }
 
 func (r *Room) Run() {
+	defer close(r.done) // Signal that Run() has exited
+
 	for {
 		select {
+		case <-r.stop:
+			r.mu.Lock()
+			r.stopped = true
+			// Stop the timer to prevent callbacks
+			r.timerMgr.Stop()
+			r.mu.Unlock()
+			return
+
 		case client := <-r.join:
 			r.handleJoin(client)
 
@@ -209,7 +224,9 @@ func (r *Room) Run() {
 
 		case msg := <-r.broadcast:
 			r.mu.RLock()
-			r.emitter.Broadcast(msg)
+			if !r.stopped {
+				r.emitter.Broadcast(msg)
+			}
 			r.mu.RUnlock()
 
 		case req := <-r.selectChampion:
@@ -249,6 +266,23 @@ func (r *Room) Run() {
 			r.handleReadyToResume(req)
 		}
 	}
+}
+
+// Stop gracefully stops the room
+func (r *Room) Stop() {
+	r.mu.Lock()
+	if r.stopped {
+		r.mu.Unlock()
+		return
+	}
+	r.mu.Unlock()
+
+	close(r.stop)
+}
+
+// Wait blocks until the room's Run() goroutine has exited
+func (r *Room) Wait() {
+	<-r.done
 }
 
 func (r *Room) handleJoin(client *Client) {
@@ -430,9 +464,8 @@ func (r *Room) handleLockIn(client *Client) {
 
 	championID := r.draftMgr.GetCurrentHover(currentSide)
 	if championID == nil {
-		none := "None"
-		championID = &none
-
+		client.sendError("NO_SELECTION", "No champion selected")
+		return
 	}
 
 	// Apply the selection
@@ -551,9 +584,8 @@ func (r *Room) sendStateSync(client *Client) {
 
 // syncAllClients sends state sync to all connected clients.
 // Called by DraftStateManager after state changes.
+// IMPORTANT: Caller must hold r.mu lock (read or write).
 func (r *Room) syncAllClients() {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
 	for client := range r.clients {
 		r.sendStateSyncLocked(client)
 	}

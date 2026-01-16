@@ -178,6 +178,7 @@ func NewTestServer(t *testing.T) *TestServer {
 	}
 
 	t.Cleanup(func() {
+		hub.Stop()
 		server.Close()
 	})
 

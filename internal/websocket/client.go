@@ -3,6 +3,7 @@ package websocket
 import (
 	"encoding/json"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,6 +25,9 @@ type Client struct {
 	userID uuid.UUID
 	side   string // "blue", "red", "spectator"
 	ready  bool
+
+	mu     sync.RWMutex
+	closed bool
 }
 
 func NewClient(hub *Hub, conn *websocket.Conn, userID uuid.UUID) *Client {
@@ -37,7 +41,7 @@ func NewClient(hub *Hub, conn *websocket.Conn, userID uuid.UUID) *Client {
 
 func (c *Client) ReadPump() {
 	defer func() {
-		c.hub.unregister <- c
+		c.hub.Unregister(c)
 		c.conn.Close()
 	}()
 
@@ -137,7 +141,7 @@ func (c *Client) sendError(code, message string) {
 		Message: message,
 	})
 	data, _ := json.Marshal(msg)
-	c.send <- data
+	c.trySend(data)
 }
 
 func (c *Client) Send(msg *Message) {
@@ -146,6 +150,38 @@ func (c *Client) Send(msg *Message) {
 		log.Printf("failed to marshal message: %v", err)
 		return
 	}
-	c.send <- data
+	c.trySend(data)
+}
+
+// trySend safely sends data to the client, handling closed channels gracefully.
+// The RLock is held through the entire send to prevent races with Close().
+func (c *Client) trySend(data []byte) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.closed {
+		return
+	}
+
+	// Non-blocking send - if buffer is full, drop the message
+	select {
+	case c.send <- data:
+	default:
+		// Buffer full, drop the message
+	}
+}
+
+// Close marks the client as closed and closes its send channel.
+// Safe to call multiple times.
+func (c *Client) Close() {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
+	c.closed = true
+	c.mu.Unlock()
+
+	close(c.send)
 }
 

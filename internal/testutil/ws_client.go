@@ -43,8 +43,6 @@ func NewWSClient(t *testing.T, url string) *WSClient {
 	go client.readPump()
 
 	t.Cleanup(func() {
-		// Give time for any pending operations to complete
-		time.Sleep(200 * time.Millisecond)
 		client.Close()
 	})
 
@@ -84,7 +82,7 @@ func (c *WSClient) readPump() {
 	}
 }
 
-// Close closes the WebSocket connection
+// Close closes the WebSocket connection gracefully
 func (c *WSClient) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -94,8 +92,7 @@ func (c *WSClient) Close() {
 		return
 	default:
 		close(c.done)
-		// Give the server time to process any pending messages
-		time.Sleep(100 * time.Millisecond)
+		// Send close frame and close connection without artificial delay
 		c.conn.WriteMessage(gorillaWS.CloseMessage, gorillaWS.FormatCloseMessage(gorillaWS.CloseNormalClosure, ""))
 		c.conn.Close()
 	}
@@ -367,22 +364,173 @@ func (c *WSClient) ExpectNoMessage(timeout time.Duration) {
 	}
 }
 
-// DrainMessages drains all pending messages from the channel
+// DrainMessages drains all pending messages from the channel with a timeout.
+// It waits for messages to settle, then drains everything currently buffered.
 func (c *WSClient) DrainMessages() {
+	c.DrainMessagesWithTimeout(100 * time.Millisecond)
+}
+
+// DrainMessagesWithTimeout drains messages, waiting up to timeout for the channel to settle.
+// This replaces the old sleep+drain pattern with a proper implementation.
+func (c *WSClient) DrainMessagesWithTimeout(timeout time.Duration) {
+	deadline := time.After(timeout)
 	for {
 		select {
-		case <-c.messages:
-		default:
+		case msg := <-c.messages:
+			if msg == nil {
+				return
+			}
+			// Reset deadline when we receive a message - more might be coming
+			deadline = time.After(50 * time.Millisecond)
+		case <-deadline:
+			// No messages for timeout duration, channel is settled
+			return
+		case <-c.done:
 			return
 		}
 	}
 }
 
-// WaitForConnection waits for the initial connection to be established
-func (c *WSClient) WaitForConnection(timeout time.Duration) {
+// ExpectAnyMessage waits for any message to arrive and returns it
+func (c *WSClient) ExpectAnyMessage(timeout time.Duration) *websocket.Message {
 	c.t.Helper()
 
-	// The connection is already established in NewWSClient
-	// This is just for symmetry in tests
-	time.Sleep(50 * time.Millisecond)
+	select {
+	case msg := <-c.messages:
+		if msg == nil {
+			c.t.Fatal("connection closed while waiting for message")
+		}
+		return msg
+	case err := <-c.errors:
+		c.t.Fatalf("error while waiting for message: %v", err)
+	case <-time.After(timeout):
+		c.t.Fatal("timeout waiting for any message")
+	}
+	return nil
+}
+
+// WaitForMessageCount waits until at least count messages have been received.
+// It drains those messages and returns them.
+func (c *WSClient) WaitForMessageCount(count int, timeout time.Duration) []*websocket.Message {
+	c.t.Helper()
+
+	messages := make([]*websocket.Message, 0, count)
+	deadline := time.After(timeout)
+
+	for len(messages) < count {
+		select {
+		case msg := <-c.messages:
+			if msg == nil {
+				c.t.Fatalf("connection closed after receiving %d/%d messages", len(messages), count)
+			}
+			// Skip TIMER_TICK messages as they're noise
+			if msg.Type != websocket.MessageTypeTimerTick {
+				messages = append(messages, msg)
+			}
+		case err := <-c.errors:
+			c.t.Fatalf("error after receiving %d/%d messages: %v", len(messages), count, err)
+		case <-deadline:
+			c.t.Fatalf("timeout waiting for messages: got %d/%d", len(messages), count)
+		}
+	}
+
+	return messages
+}
+
+// ExpectPlayerUpdateForSide waits for a PLAYER_UPDATE message for a specific side
+func (c *WSClient) ExpectPlayerUpdateForSide(side string, timeout time.Duration) *websocket.PlayerUpdatePayload {
+	c.t.Helper()
+
+	deadline := time.After(timeout)
+	for {
+		select {
+		case msg := <-c.messages:
+			if msg == nil {
+				c.t.Fatalf("connection closed while waiting for PLAYER_UPDATE for %s", side)
+			}
+			if msg.Type == websocket.MessageTypePlayerUpdate {
+				var payload websocket.PlayerUpdatePayload
+				if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+					c.t.Fatalf("failed to decode player update payload: %v", err)
+				}
+				if payload.Side == side {
+					return &payload
+				}
+			}
+			// Skip other message types
+		case err := <-c.errors:
+			c.t.Fatalf("error while waiting for PLAYER_UPDATE for %s: %v", side, err)
+		case <-deadline:
+			c.t.Fatalf("timeout waiting for PLAYER_UPDATE for side %s", side)
+		}
+	}
+}
+
+// ExpectMessagesOfTypes waits for messages of the specified types in any order.
+// Returns a map of message type to the received message.
+func (c *WSClient) ExpectMessagesOfTypes(types []websocket.MessageType, timeout time.Duration) map[websocket.MessageType]*websocket.Message {
+	c.t.Helper()
+
+	needed := make(map[websocket.MessageType]bool)
+	for _, t := range types {
+		needed[t] = true
+	}
+
+	result := make(map[websocket.MessageType]*websocket.Message)
+	deadline := time.After(timeout)
+
+	for len(result) < len(types) {
+		select {
+		case msg := <-c.messages:
+			if msg == nil {
+				c.t.Fatalf("connection closed while waiting for messages, got %d/%d", len(result), len(types))
+			}
+			if needed[msg.Type] && result[msg.Type] == nil {
+				result[msg.Type] = msg
+			}
+			// Skip messages we're not looking for or already have
+		case err := <-c.errors:
+			c.t.Fatalf("error while waiting for messages: %v", err)
+		case <-deadline:
+			missing := []websocket.MessageType{}
+			for _, t := range types {
+				if result[t] == nil {
+					missing = append(missing, t)
+				}
+			}
+			c.t.Fatalf("timeout waiting for messages, missing: %v", missing)
+		}
+	}
+
+	return result
+}
+
+// SkipUntilMessageType skips messages until finding one of the specified type
+func (c *WSClient) SkipUntilMessageType(msgType websocket.MessageType, timeout time.Duration) *websocket.Message {
+	c.t.Helper()
+
+	deadline := time.After(timeout)
+	for {
+		select {
+		case msg := <-c.messages:
+			if msg == nil {
+				c.t.Fatalf("connection closed while waiting for %s", msgType)
+			}
+			if msg.Type == msgType {
+				return msg
+			}
+			// Skip other messages
+		case err := <-c.errors:
+			c.t.Fatalf("error while waiting for %s: %v", msgType, err)
+		case <-deadline:
+			c.t.Fatalf("timeout waiting for message type %s", msgType)
+		}
+	}
+}
+
+// WaitForConnection is a no-op since connection is established in NewWSClient.
+// Kept for API compatibility.
+func (c *WSClient) WaitForConnection(timeout time.Duration) {
+	// Connection is already established in NewWSClient
+	// No sleep needed - the dial succeeded or would have failed
 }
