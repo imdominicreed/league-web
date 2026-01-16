@@ -298,7 +298,7 @@ func TestDraftFlow_ChampionUnavailable(t *testing.T) {
 	assert.Contains(t, errorPayload.Message, "already picked or banned")
 }
 
-func TestDraftFlow_NoSelectionError(t *testing.T) {
+func TestDraftFlow_NoSelection_UsesNone(t *testing.T) {
 	ts := testutil.NewTestServer(t)
 
 	// Create users
@@ -338,12 +338,14 @@ func TestDraftFlow_NoSelectionError(t *testing.T) {
 	blueClient.DrainMessages()
 	redClient.DrainMessages()
 
-	// Blue tries to lock in without selecting
+	// Blue locks in without selecting - should use "None"
 	blueClient.LockIn()
 
-	// Expect error
-	errorPayload := blueClient.ExpectErrorWithCode("NO_SELECTION", defaultTimeout)
-	assert.Contains(t, errorPayload.Message, "No champion selected")
+	// Expect champion selected with "None"
+	selected := blueClient.ExpectChampionSelected(defaultTimeout)
+	assert.Equal(t, "None", selected.ChampionID)
+	assert.Equal(t, "ban", selected.ActionType)
+	assert.Equal(t, "blue", selected.Team)
 }
 
 func TestDraftFlow_FullDraft(t *testing.T) {
