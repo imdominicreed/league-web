@@ -136,6 +136,12 @@ EXAMPLES:
   simulator end-voting --lobby=ABC123 --force=3`)
 }
 
+// SimUser tracks a simulated user and their token for URL generation
+type SimUser struct {
+	DisplayName string
+	Token       string
+}
+
 func fullCmd(apiURL string, args []string) {
 	fs := flag.NewFlagSet("full", flag.ExitOnError)
 	option := fs.Int("option", 1, "Match option to select (1-5)")
@@ -188,6 +194,9 @@ func fullCmd(apiURL string, args []string) {
 		fmt.Printf("Warning: Failed to set admin profiles: %v\n", err)
 	}
 
+	// Track all users with their tokens for URL generation
+	users := []SimUser{{DisplayName: admin.DisplayName, Token: adminToken}}
+
 	// 2. Create and join additional users
 	tokens := []string{adminToken}
 	fmt.Println()
@@ -215,6 +224,7 @@ func fullCmd(apiURL string, args []string) {
 		}
 
 		tokens = append(tokens, token)
+		users = append(users, SimUser{DisplayName: user.DisplayName, Token: token})
 		fmt.Printf("  [%d/%d] %s joined\n", i+1, *count, user.DisplayName)
 	}
 
@@ -226,14 +236,16 @@ func fullCmd(apiURL string, args []string) {
 		fmt.Printf("  LOBBY WAITING FOR %d MORE PLAYER(S)\n", slotsOpen)
 		fmt.Println("=========================================")
 		fmt.Println()
-		fmt.Printf("  Lobby URL:  %s/lobby/%s\n", frontendURL, lobby.ShortCode)
 		fmt.Printf("  Short Code: %s\n", lobby.ShortCode)
 		fmt.Println()
+		fmt.Println("  Click any link to auto-login as that user:")
+		for _, u := range users {
+			fmt.Printf("  - %s: %s/lobby/%s?token=%s\n", u.DisplayName, frontendURL, lobby.ShortCode, u.Token)
+		}
+		fmt.Println()
 		fmt.Println("  Next steps:")
-		fmt.Println("  1. Open the lobby URL in your browser")
-		fmt.Println("  2. Register/login if needed")
-		fmt.Println("  3. Join the lobby")
-		fmt.Println("  4. Click 'Ready Up'")
+		fmt.Println("  1. Click a link above to auto-login and join")
+		fmt.Println("  2. Click 'Ready Up'")
 		if !*skipReady {
 			fmt.Println()
 			fmt.Println("  The fake players are already ready.")
@@ -262,8 +274,12 @@ func fullCmd(apiURL string, args []string) {
 		fmt.Println("  LOBBY POPULATED (ready skipped)")
 		fmt.Println("=========================================")
 		fmt.Println()
-		fmt.Printf("  Lobby URL:  %s/lobby/%s\n", frontendURL, lobby.ShortCode)
 		fmt.Printf("  Short Code: %s\n", lobby.ShortCode)
+		fmt.Println()
+		fmt.Println("  Click any link to auto-login as that user:")
+		for _, u := range users {
+			fmt.Printf("  - %s: %s/lobby/%s?token=%s\n", u.DisplayName, frontendURL, lobby.ShortCode, u.Token)
+		}
 		fmt.Println()
 		return
 	}
@@ -302,9 +318,13 @@ func fullCmd(apiURL string, args []string) {
 	fmt.Println("  LOBBY READY FOR DRAFT")
 	fmt.Println("=========================================")
 	fmt.Println()
-	fmt.Printf("  Lobby URL:  %s/lobby/%s\n", frontendURL, lobby.ShortCode)
 	fmt.Printf("  Short Code: %s\n", lobby.ShortCode)
 	fmt.Printf("  Lobby ID:   %s\n", lobby.ID)
+	fmt.Println()
+	fmt.Println("  Click any link to auto-login as that user:")
+	for _, u := range users {
+		fmt.Printf("  - %s: %s/lobby/%s?token=%s\n", u.DisplayName, frontendURL, lobby.ShortCode, u.Token)
+	}
 	fmt.Println()
 	fmt.Println("  Click 'Start Draft' in the UI to begin!")
 	fmt.Println()
@@ -326,6 +346,7 @@ func populateCmd(apiURL string, args []string) {
 
 	fmt.Printf("Adding %d players to lobby %s...\n\n", *count, *lobbyCode)
 
+	var users []SimUser
 	for i := 0; i < *count; i++ {
 		displayName := fmt.Sprintf("Player%d", i+1)
 		user, token, err := client.RegisterUser(displayName)
@@ -347,11 +368,16 @@ func populateCmd(apiURL string, args []string) {
 			fmt.Printf("Warning: Failed to set profiles for %s\n", user.DisplayName)
 		}
 
+		users = append(users, SimUser{DisplayName: user.DisplayName, Token: token})
 		fmt.Printf("  [%d/%d] %s joined\n", i+1, *count, user.DisplayName)
 	}
 
 	fmt.Println()
-	fmt.Printf("Done! View lobby at: %s/lobby/%s\n", frontendURL, *lobbyCode)
+	fmt.Println("Done! Click any link to auto-login as that user:")
+	for _, u := range users {
+		fmt.Printf("  - %s: %s/lobby/%s?token=%s\n", u.DisplayName, frontendURL, *lobbyCode, u.Token)
+	}
+	fmt.Println()
 }
 
 func readyCmd(apiURL string, args []string) {
