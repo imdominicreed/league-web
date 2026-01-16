@@ -11,7 +11,7 @@ const API_BASE = 'http://localhost:9999/api/v1';
 async function createRoomViaApi(
   token: string,
   options: { draftMode?: string; timerDurationSeconds?: number } = {}
-): Promise<{ id: string; code: string }> {
+): Promise<{ id: string; shortCode: string }> {
   const response = await fetch(`${API_BASE}/rooms`, {
     method: 'POST',
     headers: {
@@ -70,13 +70,12 @@ test.describe('1v1 Draft Flow', () => {
     await homePage.expectAuthenticated(username);
 
     // Click Create Draft
-    await page.click('a:has-text("Create Draft")');
-    await page.waitForURL('/create-draft');
+    await page.click('a:has-text("Create Draft Room")');
+    await page.waitForURL('/create');
 
-    // Fill in the form and create
-    await page.selectOption('select[name="draftMode"]', 'pro_play');
-    await page.fill('input[name="timerDuration"]', '30');
-    await page.click('button:has-text("Create Draft Room")');
+    // Select Pro Play mode (default) and create room
+    await page.click('button:has-text("Pro Play")');
+    await page.click('button:has-text("Create Room")');
 
     // Should redirect to draft room
     await page.waitForURL(/\/draft\//, { timeout: TIMEOUTS.LONG });
@@ -109,12 +108,12 @@ test.describe('1v1 Draft Flow', () => {
     await page.reload();
 
     // Navigate to join draft
-    await page.click('a:has-text("Join Draft")');
-    await page.waitForURL('/join-draft');
+    await page.click('a:has-text("Join Room")');
+    await page.waitForURL('/join');
 
     // Enter room code
-    await page.fill('input[name="roomCode"]', room.code);
-    await page.click('button:has-text("Join")');
+    await page.fill('input#code', room.shortCode);
+    await page.click('button:has-text("Join Room")');
 
     // Should redirect to draft room
     await page.waitForURL(/\/draft\//, { timeout: TIMEOUTS.LONG });

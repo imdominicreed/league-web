@@ -117,7 +117,7 @@ export default function ChampionGrid({ onSelect, onLockIn, onHover, onProposeEdi
   const isPicking = draft.actionType === 'pick'
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 p-6">
+    <div className="flex-1 flex flex-col min-h-0 p-6" data-testid="champion-grid">
 
       {/* Edit Mode Banner */}
       {isEditMode && draft.editingSlot && (

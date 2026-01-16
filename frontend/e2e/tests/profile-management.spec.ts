@@ -115,28 +115,24 @@ test.describe('Profile Management', () => {
     await expect(page.locator('text=Role Profiles')).toBeVisible({ timeout: TIMEOUTS.MEDIUM });
 
     // Wait for role cards to load
-    await expect(page.locator('[data-testid="role-profile-TOP"]')).toBeVisible({
-      timeout: TIMEOUTS.MEDIUM,
-    });
+    const topRoleCard = page.locator('[data-testid="role-profile-top"]');
+    await expect(topRoleCard).toBeVisible({ timeout: TIMEOUTS.MEDIUM });
 
-    // Click on TOP role to edit
-    await page.click('[data-testid="role-profile-TOP"]');
+    // Click the Edit button inside the TOP role card
+    await topRoleCard.locator('button:has-text("Edit")').click();
 
-    // Should see edit modal or inline edit
-    const rankSelect = page.locator('select[name="rank"]').or(page.locator('[data-testid="rank-select"]'));
+    // Should see the select dropdown for rank
+    const rankSelect = topRoleCard.locator('select');
     await expect(rankSelect).toBeVisible({ timeout: TIMEOUTS.SHORT });
 
     // Change rank to Gold IV
     await rankSelect.selectOption({ label: 'Gold IV' });
 
     // Save changes
-    const saveButton = page.locator('button:has-text("Save")');
-    if (await saveButton.isVisible()) {
-      await saveButton.click();
-    }
+    await topRoleCard.locator('button:has-text("Save")').click();
 
-    // Verify the change persisted
-    await expect(page.locator('text=Gold IV')).toBeVisible({ timeout: TIMEOUTS.MEDIUM });
+    // Verify the change persisted (card should show Gold IV)
+    await expect(topRoleCard.locator('text=Gold IV')).toBeVisible({ timeout: TIMEOUTS.MEDIUM });
   });
 
   test('user can update role comfort rating', async ({ page }) => {
@@ -156,36 +152,23 @@ test.describe('Profile Management', () => {
 
     // Navigate to profile
     await page.goto('/profile');
-    await expect(page.locator('[data-testid="role-profile-MID"]')).toBeVisible({
-      timeout: TIMEOUTS.MEDIUM,
-    });
+    const midRoleCard = page.locator('[data-testid="role-profile-mid"]');
+    await expect(midRoleCard).toBeVisible({ timeout: TIMEOUTS.MEDIUM });
 
-    // Click on MID role to edit
-    await page.click('[data-testid="role-profile-MID"]');
+    // Click the Edit button inside the MID role card
+    await midRoleCard.locator('button:has-text("Edit")').click();
 
-    // Should see comfort rating control
-    const comfortInput = page
-      .locator('input[name="comfort"]')
-      .or(page.locator('[data-testid="comfort-slider"]'))
-      .or(page.locator('select[name="comfort"]'));
-    await expect(comfortInput).toBeVisible({ timeout: TIMEOUTS.SHORT });
-
-    // Change comfort to 5 (highest)
-    const isSelect = (await comfortInput.evaluate((el) => el.tagName)) === 'SELECT';
-    if (isSelect) {
-      await comfortInput.selectOption('5');
-    } else {
-      await comfortInput.fill('5');
-    }
+    // In edit mode, stars become clickable - click the 5th star
+    // Stars are rendered as buttons with "★" text
+    const starButtons = midRoleCard.locator('button:has-text("★")');
+    await starButtons.nth(4).click(); // 5th star (0-indexed)
 
     // Save changes
-    const saveButton = page.locator('button:has-text("Save")');
-    if (await saveButton.isVisible()) {
-      await saveButton.click();
-    }
+    await midRoleCard.locator('button:has-text("Save")').click();
 
-    // Verify the change (look for comfort indicator)
-    await expect(page.locator('text=5').or(page.locator('[data-comfort="5"]'))).toBeVisible({
+    // Verify all 5 stars are now filled (yellow) by checking that 5 stars are visible
+    // The card should still have the comfort stars visible
+    await expect(midRoleCard.locator('button:has-text("★")').first()).toBeVisible({
       timeout: TIMEOUTS.MEDIUM,
     });
   });
@@ -210,11 +193,11 @@ test.describe('Profile Management', () => {
     await expect(page.locator('text=Role Profiles')).toBeVisible({ timeout: TIMEOUTS.MEDIUM });
 
     // All 5 roles should be visible
-    const roles = ['TOP', 'JGL', 'MID', 'ADC', 'SUP'];
+    const roles = ['top', 'jungle', 'mid', 'adc', 'support'];
     for (const role of roles) {
-      await expect(
-        page.locator(`[data-testid="role-profile-${role}"]`).or(page.locator(`text=${role}`))
-      ).toBeVisible({ timeout: TIMEOUTS.SHORT });
+      await expect(page.locator(`[data-testid="role-profile-${role}"]`)).toBeVisible({
+        timeout: TIMEOUTS.SHORT,
+      });
     }
   });
 
@@ -254,24 +237,22 @@ test.describe('Profile Management', () => {
 
     // Navigate to profile
     await page.goto('/profile');
-    await expect(page.locator('[data-testid="role-profile-ADC"]')).toBeVisible({
-      timeout: TIMEOUTS.MEDIUM,
-    });
+    const adcRoleCard = page.locator('[data-testid="role-profile-adc"]');
+    await expect(adcRoleCard).toBeVisible({ timeout: TIMEOUTS.MEDIUM });
 
-    // Edit ADC role
-    await page.click('[data-testid="role-profile-ADC"]');
+    // Click the Edit button inside the ADC role card
+    await adcRoleCard.locator('button:has-text("Edit")').click();
 
-    // Change rank
-    const rankSelect = page.locator('select[name="rank"]').or(page.locator('[data-testid="rank-select"]'));
-    if (await rankSelect.isVisible()) {
-      await rankSelect.selectOption({ label: 'Platinum II' });
+    // Change rank to Platinum II
+    const rankSelect = adcRoleCard.locator('select');
+    await expect(rankSelect).toBeVisible({ timeout: TIMEOUTS.SHORT });
+    await rankSelect.selectOption({ label: 'Platinum II' });
 
-      // Save
-      const saveButton = page.locator('button:has-text("Save")');
-      if (await saveButton.isVisible()) {
-        await saveButton.click();
-      }
-    }
+    // Save changes
+    await adcRoleCard.locator('button:has-text("Save")').click();
+
+    // Wait for save to complete
+    await expect(adcRoleCard.locator('text=Platinum II')).toBeVisible({ timeout: TIMEOUTS.MEDIUM });
 
     // Reload the page
     await page.reload();

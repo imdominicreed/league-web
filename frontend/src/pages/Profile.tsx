@@ -76,7 +76,7 @@ export default function Profile() {
         )}
 
         <div className="mb-8">
-          <h2 className="text-xl font-semibold text-white mb-4">Role Rankings</h2>
+          <h2 className="text-xl font-semibold text-white mb-4">Role Profiles</h2>
           <p className="text-gray-400 mb-6">
             Set your rank and comfort level for each role. This will be used for
             matchmaking in 10-man lobbies.

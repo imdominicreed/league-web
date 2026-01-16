@@ -64,7 +64,7 @@ export function RoleProfileEditor({ profile, onUpdate, isUpdating }: RoleProfile
   }
 
   return (
-    <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+    <div className="bg-gray-800 rounded-lg p-4 border border-gray-700" data-testid={`role-profile-${profile.role}`}>
       <div className="flex items-center gap-3 mb-4">
         <div className="w-12 h-12 bg-gray-700 rounded-full flex items-center justify-center">
           <span className="text-2xl">{ROLE_DISPLAY_NAMES[profile.role][0]}</span>
