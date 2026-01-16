@@ -198,7 +198,7 @@ export default function ChampionGrid({ onSelect, onLockIn, onHover, onProposeEdi
 
       {/* Champion Grid - Smaller icons */}
       <div className="flex-1 overflow-y-auto min-h-0 bg-lol-gray/30 rounded border border-lol-border p-3">
-        <div className="grid grid-cols-8 gap-y-8 gap-x-3" data-testid="champion-grid">
+        <div className="grid grid-cols-8 gap-y-8 gap-x-3" data-testid="champion-grid-items">
           {filteredChampions.map(champion => {
             const isUsed = usedChampions.has(champion.id)
             const isSelected = selectedChampion === champion.id

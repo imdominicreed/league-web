@@ -195,12 +195,13 @@ test.describe('Draft Edge Cases: Invalid Actions', () => {
   test('banned champion button is disabled in pick phase', async ({ lobbyWithUsers }) => {
     test.setTimeout(180000);
 
+    // Use full 10 real users for draft tests since captains need WebSocket connection
     const { draftPages } = await setupDraftFromLobby(lobbyWithUsers);
     await readyUpAndStartDraft(draftPages);
 
-    // Get the first action to track phase changes
+    // Get the first action to track phase changes (case-insensitive check)
     const initialAction = await draftPages[0].getCurrentAction();
-    expect(initialAction).toContain('Ban');
+    expect(initialAction.toLowerCase()).toContain('ban');
 
     // Complete all 6 ban phases (indices 0-5)
     await completePhases(draftPages, 6, 0);
@@ -398,17 +399,27 @@ test.describe('Draft Edge Cases: Timer Expiry', () => {
 
     // Get initial action (should be Blue Ban)
     const initialAction = await draftPages[0].getCurrentAction();
-    expect(initialAction.toLowerCase()).toContain('blue');
+    const initialTeam = await draftPages[0].getCurrentTeam();
     expect(initialAction.toLowerCase()).toContain('ban');
+    expect(initialTeam.toLowerCase()).toContain('blue');
 
     // Don't take any action - let timer expire
-    // Wait for phase to auto-advance (timer is 5 seconds)
-    await draftPages[0].waitForPhaseChange(initialAction, 10000);
+    // Wait for team to change (timer is 5 seconds, Blue → Red)
+    await expect
+      .poll(
+        async () => {
+          const team = await draftPages[0].getCurrentTeam();
+          return team.toLowerCase().includes('red');
+        },
+        { timeout: 15000, intervals: [500, 1000] }
+      )
+      .toBe(true);
 
     // Phase should have auto-advanced to Red Ban
     const currentAction = await draftPages[0].getCurrentAction();
-    expect(currentAction.toLowerCase()).toContain('red');
+    const currentTeam = await draftPages[0].getCurrentTeam();
     expect(currentAction.toLowerCase()).toContain('ban');
+    expect(currentTeam.toLowerCase()).toContain('red');
   });
 
   test('multiple timer expiries advance draft correctly', async ({ createUsers }) => {
@@ -418,12 +429,21 @@ test.describe('Draft Edge Cases: Timer Expiry', () => {
     const { draftPages } = await setupDraftWithShortTimer(createUsers, 3);
     await readyUpAndStartDraft(draftPages);
 
-    // Let 3 phases expire by waiting for the action to change 3 times
+    // Let 3 phases expire by watching for state changes (team or action)
     // Each phase is 3 seconds
-    let currentAction = await draftPages[0].getCurrentAction();
+    let currentTeam = await draftPages[0].getCurrentTeam();
     for (let i = 0; i < 3; i++) {
-      await draftPages[0].waitForPhaseChange(currentAction, 8000);
-      currentAction = await draftPages[0].getCurrentAction();
+      // Wait for team to change (alternates Blue → Red → Blue → ...)
+      await expect
+        .poll(
+          async () => {
+            const team = await draftPages[0].getCurrentTeam();
+            return team !== currentTeam;
+          },
+          { timeout: 10000, intervals: [500, 1000] }
+        )
+        .toBe(true);
+      currentTeam = await draftPages[0].getCurrentTeam();
     }
 
     // Should have advanced 3+ phases

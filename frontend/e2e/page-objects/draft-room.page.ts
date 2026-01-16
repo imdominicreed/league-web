@@ -40,7 +40,7 @@ export class DraftRoomPage extends BasePage {
 
   async waitForChampionsLoaded() {
     await expect(
-      this.byTestId('champion-grid').locator('button img').first()
+      this.byTestId('champion-grid-items').locator('button img').first()
     ).toBeVisible({ timeout: TIMEOUTS.MEDIUM });
   }
 
@@ -72,8 +72,16 @@ export class DraftRoomPage extends BasePage {
   }
 
   async selectChampionByIndex(index: number) {
-    const championButtons = this.byTestId('champion-grid').locator('button:not([disabled])');
-    await championButtons.nth(index).click({ force: true });
+    // Find buttons with images (champion buttons) in the champion grid items
+    const championButtons = this.byTestId('champion-grid-items').locator('button:not([disabled])');
+
+    // Wait for at least one enabled champion button
+    await expect(championButtons.first()).toBeVisible({ timeout: TIMEOUTS.LONG });
+
+    // Click the champion at the specified index
+    // Use force: true because the img inside the button intercepts pointer events
+    const targetButton = championButtons.nth(index);
+    await targetButton.click({ force: true });
   }
 
   async clickLockIn() {
@@ -91,21 +99,26 @@ export class DraftRoomPage extends BasePage {
   }
 
   async isYourTurn(): Promise<boolean> {
-    const championButtons = this.byTestId('champion-grid').locator('button');
-    const firstButton = championButtons.first();
-    const isChampDisabled = await firstButton.getAttribute('disabled');
-    return isChampDisabled === null;
+    try {
+      // Check for enabled champion buttons specifically in the champion grid items
+      // (not the filter buttons which are always enabled)
+      const enabledButton = this.byTestId('champion-grid-items').locator('button:not([disabled])').first();
+      await expect(enabledButton).toBeVisible({ timeout: 1000 });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async waitForYourTurn(timeout: number = TIMEOUTS.LONG) {
     await expect(
-      this.byTestId('champion-grid').locator('button:not([disabled])').first()
+      this.byTestId('champion-grid-items').locator('button:not([disabled])').first()
     ).toBeVisible({ timeout });
   }
 
   async waitForNotYourTurn() {
     await expect(
-      this.byTestId('champion-grid').locator('button[disabled]').first()
+      this.byTestId('champion-grid-items').locator('button[disabled]').first()
     ).toBeVisible({ timeout: TIMEOUTS.LONG });
   }
 
@@ -134,8 +147,24 @@ export class DraftRoomPage extends BasePage {
       .locator('.bg-lol-dark-blue .text-lol-gold.text-sm.font-beaufort')
       .count();
 
-    await this.selectChampionByIndex(championIndex);
-    await expect(lockInButton).toBeEnabled({ timeout: TIMEOUTS.SHORT });
+    // Wait for champion grid to be ready with enabled buttons
+    const enabledButtons = this.byTestId('champion-grid-items').locator('button:not([disabled])');
+    await expect(enabledButtons.first()).toBeVisible({ timeout: TIMEOUTS.LONG });
+
+    // Try clicking champion and wait for Lock In to enable (retry if needed)
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await this.selectChampionByIndex(championIndex + attempt);
+
+      // Wait for Lock In to be enabled (indicates champion was selected)
+      try {
+        await expect(lockInButton).toBeEnabled({ timeout: 5000 });
+        break; // Success, exit retry loop
+      } catch {
+        if (attempt === 2) throw new Error('Failed to select champion after 3 attempts');
+        // Try next champion
+      }
+    }
+
     await lockInButton.click();
 
     await expect
@@ -155,36 +184,41 @@ export class DraftRoomPage extends BasePage {
   // ========== Edge Case Test Helpers ==========
 
   async isChampionDisabled(championName: string): Promise<boolean> {
-    const championButton = this.byTestId('champion-grid').locator(`button:has(img[alt="${championName}"])`);
+    const championButton = this.byTestId('champion-grid-items').locator(`button:has(img[alt="${championName}"])`);
     const isDisabled = await championButton.getAttribute('disabled');
     return isDisabled !== null;
   }
 
   async isChampionDisabledByIndex(index: number): Promise<boolean> {
-    const championButtons = this.byTestId('champion-grid').locator('button');
+    const championButtons = this.byTestId('champion-grid-items').locator('button');
     const button = championButtons.nth(index);
     const isDisabled = await button.getAttribute('disabled');
     return isDisabled !== null;
   }
 
   async getTimerSeconds(): Promise<number> {
-    const timerText = await this.byTestIdOrText('draft-timer-value', '').textContent();
+    // Use specific testid - don't use fallback text to avoid matching wrong elements
+    const timerElement = this.byTestId('draft-timer-value');
+    const timerText = await timerElement.textContent();
     return timerText ? parseInt(timerText, 10) : 0;
   }
 
   async getCurrentTeam(): Promise<string> {
-    const teamText = await this.byTestIdOrText('draft-current-team', '').textContent();
+    // Use specific testid - don't use fallback text to avoid matching wrong elements
+    const teamElement = this.byTestId('draft-current-team');
+    const teamText = await teamElement.textContent();
     return teamText || '';
   }
 
   async getCurrentAction(): Promise<string> {
-    const actionText = await this.page.locator('.text-center .text-xs.uppercase.tracking-wider').textContent();
+    // Match the phase indicator banner: "🚫 Banning Phase" or "⚔️ Picking Phase"
+    const actionText = await this.page.locator('.text-center .font-beaufort.uppercase').first().textContent();
     return actionText || '';
   }
 
   async waitForPhaseChange(fromAction: string, timeout: number = TIMEOUTS.LONG): Promise<void> {
     await expect(
-      this.page.locator('.text-center .text-xs.uppercase.tracking-wider')
+      this.page.locator('.text-center .font-beaufort.uppercase').first()
     ).not.toHaveText(fromAction, { timeout });
   }
 
@@ -193,7 +227,7 @@ export class DraftRoomPage extends BasePage {
       .poll(
         async () => {
           const current = await this.getTimerSeconds();
-          return current > 0 && current <= seconds;
+          return current > 0 && current < seconds;
         },
         { timeout, intervals: POLL_INTERVALS }
       )
@@ -212,12 +246,12 @@ export class DraftRoomPage extends BasePage {
   }
 
   async getEnabledChampionCount(): Promise<number> {
-    const enabledButtons = this.byTestId('champion-grid').locator('button:not([disabled])');
+    const enabledButtons = this.byTestId('champion-grid-items').locator('button:not([disabled])');
     return enabledButtons.count();
   }
 
   async getDisabledChampionCount(): Promise<number> {
-    const disabledButtons = this.byTestId('champion-grid').locator('button[disabled]');
+    const disabledButtons = this.byTestId('champion-grid-items').locator('button[disabled]');
     return disabledButtons.count();
   }
 

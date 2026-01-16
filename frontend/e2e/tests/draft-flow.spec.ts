@@ -10,7 +10,7 @@ const API_BASE = 'http://localhost:9999/api/v1';
  */
 async function createRoomViaApi(
   token: string,
-  options: { draftMode?: string; timerDurationSeconds?: number } = {}
+  options: { draftMode?: string; timerDuration?: number } = {}
 ): Promise<{ id: string; shortCode: string }> {
   const response = await fetch(`${API_BASE}/rooms`, {
     method: 'POST',
@@ -20,7 +20,7 @@ async function createRoomViaApi(
     },
     body: JSON.stringify({
       draftMode: options.draftMode || 'pro_play',
-      timerDurationSeconds: options.timerDurationSeconds || 30,
+      timerDuration: options.timerDuration || 30,
     }),
   });
   if (!response.ok) {
@@ -138,7 +138,7 @@ test.describe('1v1 Draft Flow', () => {
     const user2Token = await loginViaApi(user2Name, password);
 
     // User 1 creates room
-    const room = await createRoomViaApi(user1Token, { timerDurationSeconds: 30 });
+    const room = await createRoomViaApi(user1Token, { timerDuration: 30 });
 
     // Create two browser contexts
     const context1 = await browser.newContext();
@@ -222,8 +222,8 @@ test.describe('1v1 Draft Flow', () => {
     const user1Token = await loginViaApi(user1Name, password);
     const user2Token = await loginViaApi(user2Name, password);
 
-    // User 1 creates room with short timer
-    const room = await createRoomViaApi(user1Token, { timerDurationSeconds: 30 });
+    // User 1 creates room with longer timer to give tests time to complete
+    const room = await createRoomViaApi(user1Token, { timerDuration: 90 });
 
     const context1 = await browser.newContext();
     const context2 = await browser.newContext();
@@ -307,40 +307,78 @@ test.describe('1v1 Draft Flow', () => {
     }
   });
 
-  test('draft room displays champion grid correctly', async ({ page }) => {
-    // Register and login
-    const username = generateTestUsername('grid');
+  test('draft room displays champion grid correctly', async ({ browser }) => {
+    test.setTimeout(120000);
+
+    // Create two users
+    const user1Name = generateTestUsername('grid1');
+    const user2Name = generateTestUsername('grid2');
     const password = 'testpassword123';
-    await registerUserViaApi(username, password);
-    const token = await loginViaApi(username, password);
+
+    await registerUserViaApi(user1Name, password);
+    await registerUserViaApi(user2Name, password);
+
+    const user1Token = await loginViaApi(user1Name, password);
+    const user2Token = await loginViaApi(user2Name, password);
 
     // Create room
-    const room = await createRoomViaApi(token);
+    const room = await createRoomViaApi(user1Token);
 
-    // Set up auth
-    await page.goto('/');
-    await page.evaluate((t) => localStorage.setItem('accessToken', t), token);
-    await page.reload();
+    // Create two browser contexts
+    const context1 = await browser.newContext();
+    const context2 = await browser.newContext();
+    const page1 = await context1.newPage();
+    const page2 = await context2.newPage();
 
-    // Navigate to draft
-    await page.goto(`/draft/${room.id}`);
+    try {
+      // Set up auth for both
+      await page1.goto('/');
+      await page1.evaluate((t) => localStorage.setItem('accessToken', t), user1Token);
+      await page1.reload();
 
-    const draftPage = new DraftRoomPage(page);
-    await draftPage.waitForDraftLoaded();
-    await draftPage.waitForWebSocketConnected();
+      await page2.goto('/');
+      await page2.evaluate((t) => localStorage.setItem('accessToken', t), user2Token);
+      await page2.reload();
 
-    // Ready up and check we can start
-    if (await draftPage.canClickReady()) {
-      await draftPage.clickReady();
+      // Both navigate to draft room
+      await page1.goto(`/draft/${room.id}`);
+      await page2.goto(`/draft/${room.id}`);
+
+      const draftPage1 = new DraftRoomPage(page1);
+      const draftPage2 = new DraftRoomPage(page2);
+
+      await draftPage1.waitForDraftLoaded();
+      await draftPage2.waitForDraftLoaded();
+      await draftPage1.waitForWebSocketConnected();
+      await draftPage2.waitForWebSocketConnected();
+
+      // Both click Ready
+      if (await draftPage1.canClickReady()) await draftPage1.clickReady();
+      if (await draftPage2.canClickReady()) await draftPage2.clickReady();
+
+      // Find and click Start Draft
+      for (const dp of [draftPage1, draftPage2]) {
+        const startBtn = dp.getPage().locator('button:has-text("Start Draft")');
+        if ((await startBtn.count()) > 0 && (await startBtn.isVisible())) {
+          await startBtn.click();
+          break;
+        }
+      }
+
+      // Wait for draft to be active
+      await draftPage1.waitForActiveState();
+
+      // Champion grid should have champions
+      await expect(page1.locator('[data-testid="champion-grid"]')).toBeVisible();
+      await expect(page1.locator('[data-testid="champion-grid-items"] button').first()).toBeVisible();
+
+      // There should be many champions available
+      const championCount = await page1.locator('[data-testid="champion-grid-items"] button').count();
+      expect(championCount).toBeGreaterThan(100);
+    } finally {
+      await context1.close();
+      await context2.close();
     }
-
-    // Champion grid should have champions
-    await expect(page.locator('[data-testid="champion-grid"]')).toBeVisible();
-    await expect(page.locator('[data-testid="champion-grid"] button').first()).toBeVisible();
-
-    // There should be many champions available
-    const championCount = await page.locator('[data-testid="champion-grid"] button').count();
-    expect(championCount).toBeGreaterThan(100);
   });
 
   test('timer countdown is displayed correctly', async ({ browser }) => {
@@ -357,8 +395,8 @@ test.describe('1v1 Draft Flow', () => {
     const user1Token = await loginViaApi(user1Name, password);
     const user2Token = await loginViaApi(user2Name, password);
 
-    // Create room with 30 second timer
-    const room = await createRoomViaApi(user1Token, { timerDurationSeconds: 30 });
+    // Create room with 60 second timer to allow setup time
+    const room = await createRoomViaApi(user1Token, { timerDuration: 60 });
 
     const context1 = await browser.newContext();
     const context2 = await browser.newContext();
@@ -401,10 +439,22 @@ test.describe('1v1 Draft Flow', () => {
 
       await draftPage1.waitForActiveState();
 
-      // Timer should be visible and counting down
+      // Wait for timer to be visible and have a value > 0
+      // The timer should reset when the draft starts
+      await expect
+        .poll(
+          async () => {
+            const timer = await draftPage1.getTimerSeconds();
+            return timer;
+          },
+          { timeout: 10000, intervals: [500, 1000] }
+        )
+        .toBeGreaterThan(0);
+
+      // Timer should be counting down
       const initialTimer = await draftPage1.getTimerSeconds();
       expect(initialTimer).toBeGreaterThan(0);
-      expect(initialTimer).toBeLessThanOrEqual(30);
+      expect(initialTimer).toBeLessThanOrEqual(60);
 
       // Wait a moment and verify it decreased
       await draftPage1.waitForTimerBelow(initialTimer);
