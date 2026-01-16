@@ -6,6 +6,8 @@ import BanBar from './BanBar'
 import PauseControls from './PauseControls'
 import EditConfirmModal from './EditConfirmModal'
 import DraftTimer from './DraftTimer'
+import { useSixSeven } from '@/hooks/useSixSeven'
+import { SixSevenOverlay } from '@/components/SixSevenOverlay'
 
 interface Props {
   ws: {
@@ -29,6 +31,9 @@ export default function DraftBoard({ ws }: Props) {
   const draft = useSelector((state: RootState) => state.draft)
   const { champions } = useSelector((state: RootState) => state.champions)
 
+  // 6-7 meme easter egg
+  const { isShaking, hasSpecialCode } = useSixSeven(draft.currentPhase, room?.shortCode)
+
   if (!room) return null
 
   const isWaiting = room.status === 'waiting'
@@ -41,11 +46,15 @@ export default function DraftBoard({ ws }: Props) {
   )
 
   return (
-    <div className="h-screen flex flex-col bg-lol-dark overflow-hidden">
+    <div className={`h-screen flex flex-col bg-lol-dark overflow-hidden ${isShaking ? 'six-seven-shake' : ''}`}>
+      {/* 6-7 easter egg overlay */}
+      <SixSevenOverlay show={isShaking} />
+
       {/* Top Bar with Room Code, Pause Controls, and Connection Status */}
       <header className="bg-lol-dark-blue/80 border-b border-lol-border px-3 py-1 flex items-center justify-between">
         <div className="text-xs text-lol-gold-light">
-          Room: <span className="font-mono text-lol-gold" data-testid="draft-room-code">{room.shortCode}</span>
+          Room: <span className={`font-mono text-lol-gold ${hasSpecialCode ? 'six-seven-glow' : ''}`} data-testid="draft-room-code">{room.shortCode}</span>
+          {hasSpecialCode && <span className="ml-1 text-[10px] opacity-60" title="6-7 meme reference">*</span>}
         </div>
 
         {/* Center: Timer and Pause Controls */}

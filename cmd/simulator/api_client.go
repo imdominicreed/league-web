@@ -47,6 +47,8 @@ type Lobby struct {
 	DraftMode            string        `json:"draftMode"`
 	TimerDurationSeconds int           `json:"timerDurationSeconds"`
 	RoomID               *string       `json:"roomId"`
+	VotingEnabled        bool          `json:"votingEnabled"`
+	VotingMode           string        `json:"votingMode"`
 	Players              []LobbyPlayer `json:"players"`
 }
 
@@ -57,6 +59,7 @@ type LobbyPlayer struct {
 	Team         *string `json:"team"`
 	AssignedRole *string `json:"assignedRole"`
 	IsReady      bool    `json:"isReady"`
+	IsCaptain    bool    `json:"isCaptain"`
 }
 
 type MatchOption struct {
@@ -84,13 +87,39 @@ type RoleProfile struct {
 	ComfortRating int    `json:"comfortRating"`
 }
 
+// Login authenticates an existing user
+func (c *APIClient) Login(displayName, password string) (string, error) {
+	body := map[string]string{
+		"displayName": displayName,
+		"password":    password,
+	}
+
+	resp, err := c.post("/auth/login", body, "")
+	if err != nil {
+		return "", fmt.Errorf("login request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("login failed (status %d): %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var result AuthResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return result.AccessToken, nil
+}
+
 // RegisterUser creates a new user account
 func (c *APIClient) RegisterUser(baseName string) (*User, string, error) {
 	displayName := fmt.Sprintf("%s_%d", baseName, time.Now().UnixNano()%100000)
 
 	body := map[string]string{
 		"displayName": displayName,
-		"password":    "testpassword123",
+		"password":    "asdf",
 	}
 
 	resp, err := c.post("/auth/register", body, "")
@@ -112,11 +141,26 @@ func (c *APIClient) RegisterUser(baseName string) (*User, string, error) {
 	return &result.User, result.AccessToken, nil
 }
 
+// CreateLobbyOptions specifies options for creating a lobby
+type CreateLobbyOptions struct {
+	VotingEnabled bool
+	VotingMode    string // "majority", "unanimous", "captain_override"
+}
+
 // CreateLobby creates a new 10-man lobby
 func (c *APIClient) CreateLobby(token string) (*Lobby, error) {
+	return c.CreateLobbyWithOptions(token, CreateLobbyOptions{})
+}
+
+// CreateLobbyWithOptions creates a new 10-man lobby with options
+func (c *APIClient) CreateLobbyWithOptions(token string, opts CreateLobbyOptions) (*Lobby, error) {
 	body := map[string]interface{}{
 		"draftMode":            "pro_play",
 		"timerDurationSeconds": 30,
+		"votingEnabled":        opts.VotingEnabled,
+	}
+	if opts.VotingMode != "" {
+		body["votingMode"] = opts.VotingMode
 	}
 
 	resp, err := c.post("/lobbies", body, token)
@@ -234,6 +278,90 @@ func (c *APIClient) SelectOption(token, lobbyID string, optionNumber int) error 
 	}
 
 	return nil
+}
+
+// VotingStatus represents the current voting state
+type VotingStatus struct {
+	VotingEnabled bool           `json:"votingEnabled"`
+	VotingMode    string         `json:"votingMode"`
+	TotalPlayers  int            `json:"totalPlayers"`
+	VotesCast     int            `json:"votesCast"`
+	VoteCounts    map[string]int `json:"voteCounts"`
+	UserVote      *int           `json:"userVote,omitempty"`
+	WinningOption *int           `json:"winningOption,omitempty"`
+	CanFinalize   bool           `json:"canFinalize"`
+}
+
+// Vote casts a vote for a match option
+func (c *APIClient) Vote(token, lobbyID string, optionNumber int) (*VotingStatus, error) {
+	body := map[string]int{
+		"optionNumber": optionNumber,
+	}
+
+	resp, err := c.post("/lobbies/"+lobbyID+"/vote", body, token)
+	if err != nil {
+		return nil, fmt.Errorf("vote request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("vote failed (status %d): %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var status VotingStatus
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &status, nil
+}
+
+// GetVotingStatus gets the current voting status for a lobby
+func (c *APIClient) GetVotingStatus(token, lobbyID string) (*VotingStatus, error) {
+	resp, err := c.get("/lobbies/"+lobbyID+"/voting-status", token)
+	if err != nil {
+		return nil, fmt.Errorf("get voting status request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("get voting status failed (status %d): %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var status VotingStatus
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &status, nil
+}
+
+// EndVoting ends voting and optionally forces a specific option (captain_override mode)
+func (c *APIClient) EndVoting(token, lobbyID string, forceOption *int) (*Lobby, error) {
+	body := map[string]interface{}{}
+	if forceOption != nil {
+		body["forceOption"] = *forceOption
+	}
+
+	resp, err := c.post("/lobbies/"+lobbyID+"/end-voting", body, token)
+	if err != nil {
+		return nil, fmt.Errorf("end voting request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("end voting failed (status %d): %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var lobby Lobby
+	if err := json.NewDecoder(resp.Body).Decode(&lobby); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &lobby, nil
 }
 
 // InitializeProfiles creates default role profiles for a user

@@ -77,6 +77,8 @@ test.describe('Multi-User Lobby Flow with UI', () => {
     test.setTimeout(120000); // 2 minutes - this test involves many browser instances
 
     // Create 10 users and a lobby (via API for speed)
+    // Note: This test requires all 10 browser users because captain approval workflow
+    // needs real browser interaction from both team captains
     const { lobby, users } = await lobbyWithUsers(10);
 
     expect(lobby.players).toHaveLength(10);
@@ -457,7 +459,6 @@ test.describe('Multi-User Lobby Draft Flow', () => {
     const roomId = startData.id; // API returns 'id' not 'roomId'
 
     // Navigate all users to draft room
-    console.log(`Navigating 10 users to draft room ${roomId}...`);
     for (const user of users) {
       await user.page.goto(`/draft/${roomId}`);
     }
@@ -466,48 +467,36 @@ test.describe('Multi-User Lobby Draft Flow', () => {
     const draftPages = users.map((u) => new DraftRoomPage(u.page));
 
     // Wait for all to load and WebSocket to connect
-    console.log('Waiting for all pages to load and WebSocket to connect...');
     await Promise.all(
-      draftPages.map(async (draftPage, i) => {
+      draftPages.map(async (draftPage) => {
         await draftPage.waitForDraftLoaded();
         await draftPage.waitForWebSocketConnected();
-        console.log(`User ${i} connected`);
       })
     );
 
     // Ready up via UI - only non-spectators can click Ready
     // In 10-man draft, only 2 users (one per team) are the actual clients
     let readyClicks = 0;
-    const readyUsers: string[] = [];
-    for (let i = 0; i < draftPages.length; i++) {
-      const draftPage = draftPages[i];
+    for (const draftPage of draftPages) {
       const canReady = await draftPage.canClickReady();
-      console.log(`User ${i}: canClickReady = ${canReady}`);
       if (canReady) {
         await draftPage.clickReady();
         readyClicks++;
-        readyUsers.push(`user_${i}`);
       }
     }
 
     // Should have clicked Ready on exactly 2 pages (blue and red clients)
-    console.log(`Clicked Ready on ${readyClicks} pages: ${readyUsers.join(', ')}`);
     expect(readyClicks).toBe(2);
 
     // Find and click Start Draft - should be visible when both teams ready
-    // No reload needed - WebSocket should sync the state
-    console.log('Looking for Start Draft button...');
     let startClicked = false;
-    for (let i = 0; i < draftPages.length; i++) {
-      const draftPage = draftPages[i];
+    for (const draftPage of draftPages) {
       const startButton = draftPage.getPage().locator('button:has-text("Start Draft")');
       const count = await startButton.count();
       const isVisible = count > 0 && (await startButton.isVisible());
-      console.log(`User ${i}: Start Draft visible = ${isVisible}`);
       if (isVisible) {
         await startButton.click();
         startClicked = true;
-        console.log(`User ${i} clicked Start Draft`);
         break;
       }
     }
@@ -515,9 +504,7 @@ test.describe('Multi-User Lobby Draft Flow', () => {
     expect(startClicked).toBe(true);
 
     // Wait for active state
-    console.log('Waiting for draft to become active...');
     await draftPages[0].waitForActiveState();
-    console.log('Draft is active!');
 
     // Complete all 20 phases of pro play draft:
     // Phases 0-5: 6 bans (B-R-B-R-B-R)
@@ -527,15 +514,10 @@ test.describe('Multi-User Lobby Draft Flow', () => {
     const TOTAL_PHASES = 20;
 
     for (let phase = 0; phase < TOTAL_PHASES; phase++) {
-      console.log(`Phase ${phase}: waiting for player turn...`);
-
       // Use waitForAnyTurn for proper Playwright waiting instead of manual polling
       const captain = await waitForAnyTurn(draftPages, 15000);
-      console.log(`Phase ${phase}: player taking turn`);
       await captain.performBanOrPick(phase);
     }
-
-    console.log('All 20 phases complete!');
 
     // Verify draft is complete
     await draftPages[0].expectDraftComplete();

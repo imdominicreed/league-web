@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import { RootState, AppDispatch } from './store'
 import { fetchCurrentUser } from './store/slices/authSlice'
+import { usePendingActionsPolling } from './hooks/usePendingActionsPolling'
 import Home from './pages/Home'
 import Login from './pages/Login'
 import Register from './pages/Register'
@@ -29,6 +30,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function App() {
   const dispatch = useDispatch<AppDispatch>()
   const { isAuthenticated, user } = useSelector((state: RootState) => state.auth)
+
+  // Set up background polling for pending actions
+  usePendingActionsPolling()
 
   useEffect(() => {
     if (isAuthenticated && !user) {

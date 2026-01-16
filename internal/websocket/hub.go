@@ -166,3 +166,36 @@ func (h *Hub) DeleteRoom(roomID uuid.UUID, shortCode string) {
 func (h *Hub) Register(client *Client) {
 	h.register <- client
 }
+
+// DraftPendingAction represents a pending action in a draft room for a user
+type DraftPendingAction struct {
+	RoomID         string `json:"roomId"`
+	RoomCode       string `json:"roomCode"`
+	ActionType     string `json:"actionType"` // "pick", "ban", "pending_edit", "ready_to_resume"
+	IsYourTurn     bool   `json:"isYourTurn"`
+	CurrentPhase   int    `json:"currentPhase,omitempty"`
+	TimerRemaining int    `json:"timerRemaining,omitempty"`
+}
+
+// GetPendingDraftActionsForUser returns all pending draft actions for a user across all active rooms
+func (h *Hub) GetPendingDraftActionsForUser(userID uuid.UUID) []DraftPendingAction {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	var actions []DraftPendingAction
+	seen := make(map[string]bool) // Track room IDs to avoid duplicates (rooms are stored by both ID and short code)
+
+	for _, room := range h.rooms {
+		roomID := room.GetID().String()
+		if seen[roomID] {
+			continue
+		}
+		seen[roomID] = true
+
+		if action := room.GetPendingActionForUser(userID); action != nil {
+			actions = append(actions, *action)
+		}
+	}
+
+	return actions
+}

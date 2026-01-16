@@ -16,8 +16,6 @@ interface CaptainControlsProps {
   onToggleSwapMode: () => void
   onProposeMatchmake: () => void
   onProposeStartDraft: () => void
-  onSetReady: (ready: boolean) => void
-  isReady: boolean
   takingCaptain: boolean
   promotingCaptain: boolean
   kickingPlayer: boolean
@@ -39,8 +37,6 @@ export function CaptainControls({
   onToggleSwapMode,
   onProposeMatchmake,
   onProposeStartDraft,
-  onSetReady,
-  isReady,
   takingCaptain,
   promotingCaptain,
   kickingPlayer,
@@ -55,21 +51,6 @@ export function CaptainControls({
 
   return (
     <div className="space-y-4">
-      {/* Ready Button - always visible */}
-      <div className="flex justify-center">
-        <button
-          onClick={() => onSetReady(!isReady)}
-          className={`px-8 py-3 rounded-lg font-semibold transition-colors ${
-            isReady
-              ? 'bg-red-600 hover:bg-red-700 text-white'
-              : 'bg-green-600 hover:bg-green-700 text-white'
-          }`}
-          data-testid="captain-button-ready"
-        >
-          {isReady ? 'Cancel Ready' : 'Ready Up'}
-        </button>
-      </div>
-
       {/* Captain Controls */}
       <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
         <div className="flex items-center justify-between mb-3">

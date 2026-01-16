@@ -316,9 +316,9 @@ export async function waitForMatchOptionsLoaded(
     page.locator('[data-testid="match-option-1"]')
   ).toBeVisible({ timeout });
 
-  // Also wait for the content to be populated
+  // Also wait for the content to be populated (heading is just "Blue" not "Blue Team")
   await expect(
-    page.locator('[data-testid="match-option-1"]').locator('text=Blue Team')
+    page.locator('[data-testid="match-option-1"]').locator('text=Blue')
   ).toBeVisible({ timeout: TIMEOUTS.SHORT });
 }
 

@@ -470,3 +470,109 @@ export async function setupLobbyWithTeams(
 
   return { lobby: updatedLobby, users };
 }
+
+// ========== Hybrid Lobby Setup (Real + Simulated Users) ==========
+
+import {
+  SimulatedUser,
+  createSimulatedUsers,
+  joinLobbyAsSimulated,
+  setReadyAsSimulated,
+  initializeRoleProfilesAsSimulated,
+} from './api-users';
+
+export interface HybridLobby {
+  lobby: Lobby;
+  realUsers: UserSession[];
+  simulatedUsers: SimulatedUser[];
+}
+
+/**
+ * Create a hybrid lobby with N real browser users + M simulated (API-only) users.
+ * This reduces resource usage while maintaining full functionality for UI tests.
+ *
+ * @param createUsers - The fixture function to create browser users
+ * @param realCount - Number of real browser users (default: 4)
+ * @param simulatedCount - Number of simulated API-only users (default: 6)
+ */
+export async function setupHybridLobby(
+  createUsers: (count: number) => Promise<UserSession[]>,
+  realCount: number = 4,
+  simulatedCount: number = 6
+): Promise<HybridLobby> {
+  // Create real browser users
+  const realUsers = await createUsers(realCount);
+
+  // Create simulated API-only users
+  const simulatedUsers = await createSimulatedUsers(simulatedCount, realCount);
+
+  // Initialize role profiles for simulated users (for matchmaking)
+  await Promise.all(simulatedUsers.map((user) => initializeRoleProfilesAsSimulated(user)));
+
+  // Creator creates lobby
+  const creatorClient = new ApiClient(realUsers[0].token);
+  const lobby = await creatorClient.post<Lobby>('/lobbies', {
+    draftMode: 'pro_play',
+    timerDurationSeconds: 90,
+  });
+
+  // Real users (except creator) join via API
+  await Promise.all(
+    realUsers.slice(1).map((user) => {
+      const client = new ApiClient(user.token);
+      return client.post(`/lobbies/${lobby.id}/join`);
+    })
+  );
+
+  // Simulated users join via API
+  await Promise.all(
+    simulatedUsers.map((user) => joinLobbyAsSimulated(user, lobby.id))
+  );
+
+  // Fetch the updated lobby state
+  const updatedLobby = await creatorClient.get<Lobby>(`/lobbies/${lobby.id}`);
+
+  return { lobby: updatedLobby, realUsers, simulatedUsers };
+}
+
+/**
+ * Create a hybrid lobby with teams already selected.
+ * Uses 4 real browser users + 6 simulated users.
+ */
+export async function setupHybridLobbyWithTeams(
+  createUsers: (count: number) => Promise<UserSession[]>,
+  realCount: number = 4,
+  simulatedCount: number = 6
+): Promise<HybridLobby> {
+  const { lobby, realUsers, simulatedUsers } = await setupHybridLobby(
+    createUsers,
+    realCount,
+    simulatedCount
+  );
+
+  // All users ready up via API
+  await Promise.all([
+    ...realUsers.map((user) => setUserReady(user, lobby.id, true)),
+    ...simulatedUsers.map((user) => setReadyAsSimulated(user, lobby.id, true)),
+  ]);
+
+  // Generate teams (creator only)
+  await generateTeams(realUsers[0], lobby.id);
+
+  // Select first option
+  const updatedLobby = await selectMatchOption(realUsers[0], lobby.id, 1);
+
+  return { lobby: updatedLobby, realUsers, simulatedUsers };
+}
+
+/**
+ * Start draft from hybrid lobby and return the room ID.
+ */
+export async function startDraftFromHybridLobby(
+  realUsers: UserSession[],
+  lobbyId: string
+): Promise<string> {
+  const client = new ApiClient(realUsers[0].token);
+  const response = await client.post<{ id: string }>(`/lobbies/${lobbyId}/start-draft`);
+  return response.id;
+}

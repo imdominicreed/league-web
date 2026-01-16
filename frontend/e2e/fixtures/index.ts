@@ -55,3 +55,27 @@ export {
   waitForWebSocketConnected,
   waitForPageReady,
 } from '../helpers/wait-strategies';
+
+// API-only simulated users
+export {
+  createSimulatedUser,
+  createSimulatedUsers,
+  joinLobbyAsSimulated,
+  setReadyAsSimulated,
+  initializeRoleProfilesAsSimulated,
+  generateTeamsAsSimulated,
+  selectOptionAsSimulated,
+  startDraftAsSimulated,
+  approvePendingActionAsSimulated,
+  getPendingActionAsSimulated,
+  waitForAndApprovePendingAction,
+} from './api-users';
+export type { SimulatedUser } from './api-users';
+
+// Hybrid lobby helpers (reduced browser instances)
+export {
+  setupHybridLobby,
+  setupHybridLobbyWithTeams,
+  startDraftFromHybridLobby,
+} from './multi-user';
+export type { HybridLobby } from './multi-user';

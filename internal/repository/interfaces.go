@@ -107,6 +107,7 @@ type PendingActionRepository interface {
 	Create(ctx context.Context, action *domain.PendingAction) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.PendingAction, error)
 	GetPendingByLobbyID(ctx context.Context, lobbyID uuid.UUID) (*domain.PendingAction, error)
+	GetPendingForUser(ctx context.Context, userID uuid.UUID) ([]*domain.PendingAction, error)
 	Update(ctx context.Context, action *domain.PendingAction) error
 	CancelAllPending(ctx context.Context, lobbyID uuid.UUID) error
 }

@@ -1,12 +1,18 @@
 import { Link } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { RootState } from '@/store'
+import { useSixSeven } from '@/hooks/useSixSeven'
+import { SixSevenOverlay } from '@/components/SixSevenOverlay'
 
 export default function Home() {
   const { isAuthenticated, user } = useSelector((state: RootState) => state.auth)
+  const { isShaking } = useSixSeven(0)
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-8">
+    <div className={`min-h-screen flex flex-col items-center justify-center p-8 ${isShaking ? 'six-seven-shake' : ''}`}>
+      {/* 6-7 easter egg overlay */}
+      <SixSevenOverlay show={isShaking} />
+
       <h1 className="text-5xl font-bold text-lol-gold mb-4">League Draft</h1>
       <p className="text-xl text-gray-400 mb-12">
         Pro Play Pick/Ban Simulator

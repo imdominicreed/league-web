@@ -1,12 +1,12 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import { RootState, AppDispatch } from '@/store'
 import { LobbyPlayer } from '@/types'
+import { useSixSeven } from '@/hooks/useSixSeven'
 import {
   fetchLobby,
   fetchMatchOptions,
-  setReady,
   startDraft,
   takeCaptain,
   promoteCaptain,
@@ -15,7 +15,6 @@ import {
   proposeMatchmake,
   proposeSelectOption,
   proposeStartDraft,
-  fetchPendingAction,
   approvePendingAction,
   cancelPendingAction,
   fetchTeamStats,
@@ -29,16 +28,20 @@ import { TeamStatsPanel } from '@/components/lobby/TeamStatsPanel'
 import { CaptainControls } from '@/components/lobby/CaptainControls'
 import { MatchOptionCard } from '@/components/lobby/MatchOptionCard'
 import { VotingBanner } from '@/components/lobby/VotingBanner'
+import { SixSevenOverlay } from '@/components/SixSevenOverlay'
 
 export default function LobbyRoom() {
   const { lobbyId } = useParams<{ lobbyId: string }>()
   const navigate = useNavigate()
   const dispatch = useDispatch<AppDispatch>()
 
+  // Pre-fetch lobby for the easter egg (we'll get the real data below)
+  const lobbyFromState = useSelector((state: RootState) => state.lobby.lobby)
+  const { isShaking, hasSpecialCode } = useSixSeven(0, lobbyFromState?.shortCode)
+
   const {
     lobby,
     matchOptions,
-    pendingAction,
     teamStats,
     votingStatus,
     loading,
@@ -56,6 +59,14 @@ export default function LobbyRoom() {
     endingVoting,
   } = useSelector((state: RootState) => state.lobby)
   const { user } = useSelector((state: RootState) => state.auth)
+  const { lobbyActions } = useSelector((state: RootState) => state.pendingActions)
+
+  // Get the pending action for this specific lobby from the unified pending actions
+  const pendingAction = useMemo(() => {
+    if (!lobby) return null
+    const lobbyAction = lobbyActions.find(la => la.lobbyId === lobby.id)
+    return lobbyAction?.action ?? null
+  }, [lobby, lobbyActions])
 
   const [pollInterval, setPollInterval] = useState<ReturnType<typeof setInterval> | null>(null)
 
@@ -63,14 +74,12 @@ export default function LobbyRoom() {
   const [swapMode, setSwapMode] = useState(false)
   const [selectedForSwap, setSelectedForSwap] = useState<string | null>(null)
 
-  // Polling for lobby state
+  // Polling for lobby state (pending actions are handled by unified polling in App.tsx)
   useEffect(() => {
     if (lobbyId) {
       dispatch(fetchLobby(lobbyId))
-      dispatch(fetchPendingAction(lobbyId))
       const interval = setInterval(() => {
         dispatch(fetchLobby(lobbyId))
-        dispatch(fetchPendingAction(lobbyId))
       }, 3000)
       setPollInterval(interval)
       return () => clearInterval(interval)
@@ -122,14 +131,10 @@ export default function LobbyRoom() {
   const currentPlayer = lobby?.players.find(p => p.userId === user?.id)
   const currentUserSide = currentPlayer?.team || null
   const isCaptain = currentPlayer?.isCaptain || false
-  const isReady = currentPlayer?.isReady || false
   const hasTeams = lobby?.status === 'team_selected'
   const isMatchmaking = lobby?.status === 'matchmaking'
 
   // Handlers
-  const handleReady = useCallback((ready: boolean) => {
-    if (lobbyId) dispatch(setReady({ idOrCode: lobbyId, ready }))
-  }, [lobbyId, dispatch])
 
   const handleTakeCaptain = useCallback(() => {
     if (lobby) dispatch(takeCaptain(lobby.id))
@@ -243,14 +248,18 @@ export default function LobbyRoom() {
   }
 
   return (
-    <div className="min-h-screen p-8">
+    <div className={`min-h-screen p-8 ${isShaking ? 'six-seven-shake' : ''}`}>
+      {/* 6-7 easter egg overlay */}
+      <SixSevenOverlay show={isShaking} />
+
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-3xl font-bold text-lol-gold">10-Man Lobby</h1>
             <p className="text-gray-400">
-              Code: <span className="text-white font-mono" data-testid="lobby-code-display">{lobby.shortCode}</span>
+              Code: <span className={`text-white font-mono ${hasSpecialCode ? 'six-seven-glow' : ''}`} data-testid="lobby-code-display">{lobby.shortCode}</span>
+              {hasSpecialCode && <span className="ml-1 text-xs opacity-60" title="6-7 meme reference">*</span>}
               <span className="mx-2">|</span>
               Status: <span className="text-lol-blue capitalize" data-testid="lobby-status-display">{lobby.status.replace(/_/g, ' ')}</span>
             </p>
@@ -367,8 +376,6 @@ export default function LobbyRoom() {
             onToggleSwapMode={handleToggleSwapMode}
             onProposeMatchmake={handleProposeMatchmake}
             onProposeStartDraft={handleProposeStartDraft}
-            onSetReady={handleReady}
-            isReady={isReady}
             takingCaptain={takingCaptain}
             promotingCaptain={promotingCaptain}
             kickingPlayer={kickingPlayer}

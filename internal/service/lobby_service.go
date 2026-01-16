@@ -435,7 +435,7 @@ func (s *LobbyService) StartDraft(ctx context.Context, lobbyID uuid.UUID, userID
 	room.IsTeamDraft = true
 	room.LobbyID = &lobbyID
 
-	// Get lobby players to find the actual lobby captains (not by role order)
+	// Get lobby players - these have the CURRENT team/role assignments (including any swaps)
 	lobbyPlayers, err := s.lobbyPlayerRepo.GetByLobbyID(ctx, lobbyID)
 	if err != nil {
 		return nil, err
@@ -465,30 +465,31 @@ func (s *LobbyService) StartDraft(ctx context.Context, lobbyID uuid.UUID, userID
 	}
 
 	// Create RoomPlayer entries for all 10 players
+	// Use lobbyPlayer data for team/role (which includes any swaps) instead of stale MatchOption assignments
 	var roomPlayers []*domain.RoomPlayer
-	for _, assignment := range option.Assignments {
-		isCaptain := false
-		if blueCaptainID != nil && assignment.UserID == *blueCaptainID {
-			isCaptain = true
-		}
-		if redCaptainID != nil && assignment.UserID == *redCaptainID {
-			isCaptain = true
+	for _, lp := range lobbyPlayers {
+		// Skip players without team/role assignments (shouldn't happen but be safe)
+		if lp.Team == nil || lp.AssignedRole == nil {
+			continue
 		}
 
-		// Get display name from User relation
+		// Get display name from the user relation on the assignment
 		displayName := ""
-		if assignment.User != nil {
-			displayName = assignment.User.DisplayName
+		for _, assignment := range option.Assignments {
+			if assignment.UserID == lp.UserID && assignment.User != nil {
+				displayName = assignment.User.DisplayName
+				break
+			}
 		}
 
 		roomPlayer := &domain.RoomPlayer{
 			ID:           uuid.New(),
 			RoomID:       room.ID,
-			UserID:       assignment.UserID,
-			Team:         assignment.Team,
-			AssignedRole: assignment.AssignedRole,
+			UserID:       lp.UserID,
+			Team:         *lp.Team,         // Use current lobbyPlayer team (with swaps applied)
+			AssignedRole: *lp.AssignedRole, // Use current lobbyPlayer role (with swaps applied)
 			DisplayName:  displayName,
-			IsCaptain:    isCaptain,
+			IsCaptain:    lp.IsCaptain,     // Use current lobbyPlayer captain status (with swaps applied)
 			IsReady:      false,
 		}
 		roomPlayers = append(roomPlayers, roomPlayer)
@@ -569,7 +570,8 @@ func (s *LobbyService) TakeCaptain(ctx context.Context, lobbyID, userID uuid.UUI
 		return err
 	}
 
-	if lobby.Status != domain.LobbyStatusWaitingForPlayers {
+	// Allow taking captain in any lobby state before drafting starts
+	if lobby.Status == domain.LobbyStatusDrafting || lobby.Status == domain.LobbyStatusCompleted {
 		return ErrInvalidLobbyState
 	}
 
@@ -1158,10 +1160,16 @@ func (s *LobbyService) executeStartDraft(ctx context.Context, lobbyID uuid.UUID)
 		return nil, err
 	}
 
-	// Get lobby players to find the actual lobby captains (not by role order)
+	// Get lobby players - these have the CURRENT team/role assignments (including any swaps)
 	lobbyPlayers, err := s.lobbyPlayerRepo.GetByLobbyID(ctx, lobbyID)
 	if err != nil {
 		return nil, err
+	}
+
+	// Build a map of userID -> lobbyPlayer for quick lookup
+	lobbyPlayerMap := make(map[uuid.UUID]*domain.LobbyPlayer)
+	for _, lp := range lobbyPlayers {
+		lobbyPlayerMap[lp.UserID] = lp
 	}
 
 	// Find lobby captains and use blue captain as creator
@@ -1204,30 +1212,31 @@ func (s *LobbyService) executeStartDraft(ctx context.Context, lobbyID uuid.UUID)
 	}
 
 	// Create RoomPlayer entries for all 10 players
+	// Use lobbyPlayer data for team/role (which includes any swaps) instead of stale MatchOption assignments
 	var roomPlayers []*domain.RoomPlayer
-	for _, assignment := range option.Assignments {
-		isCaptain := false
-		if blueCaptainID != nil && assignment.UserID == *blueCaptainID {
-			isCaptain = true
-		}
-		if redCaptainID != nil && assignment.UserID == *redCaptainID {
-			isCaptain = true
+	for _, lp := range lobbyPlayers {
+		// Skip players without team/role assignments (shouldn't happen but be safe)
+		if lp.Team == nil || lp.AssignedRole == nil {
+			continue
 		}
 
-		// Get display name from User relation
+		// Get display name from the user relation on the assignment
 		displayName := ""
-		if assignment.User != nil {
-			displayName = assignment.User.DisplayName
+		for _, assignment := range option.Assignments {
+			if assignment.UserID == lp.UserID && assignment.User != nil {
+				displayName = assignment.User.DisplayName
+				break
+			}
 		}
 
 		roomPlayer := &domain.RoomPlayer{
 			ID:           uuid.New(),
 			RoomID:       room.ID,
-			UserID:       assignment.UserID,
-			Team:         assignment.Team,
-			AssignedRole: assignment.AssignedRole,
+			UserID:       lp.UserID,
+			Team:         *lp.Team,         // Use current lobbyPlayer team (with swaps applied)
+			AssignedRole: *lp.AssignedRole, // Use current lobbyPlayer role (with swaps applied)
 			DisplayName:  displayName,
-			IsCaptain:    isCaptain,
+			IsCaptain:    lp.IsCaptain,     // Use current lobbyPlayer captain status (with swaps applied)
 			IsReady:      false,
 		}
 		roomPlayers = append(roomPlayers, roomPlayer)

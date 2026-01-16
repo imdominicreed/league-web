@@ -35,6 +35,7 @@ func NewRouter(services *service.Services, hub *websocket.Hub, repos *repository
 	lobbyHandler := handlers.NewLobbyHandler(services.Lobby, services.Matchmaking, hub)
 	matchHistoryHandler := handlers.NewMatchHistoryHandler(repos.Room, repos.DraftState, repos.DraftAction, repos.RoomPlayer)
 	simulationHandler := handlers.NewSimulationHandler(repos.Room, repos.DraftState, repos.DraftAction, repos.RoomPlayer, cfg)
+	pendingActionsHandler := handlers.NewPendingActionsHandler(repos.Lobby, repos.PendingAction, hub)
 	wsHandler := handlers.NewWebSocketHandler(hub, services.Auth)
 
 	// API v1 routes
@@ -62,6 +63,9 @@ func NewRouter(services *service.Services, hub *websocket.Hub, repos *repository
 		// Protected routes
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.Auth(services.Auth))
+
+			// Unified pending actions
+			r.Get("/pending-actions", pendingActionsHandler.GetAll)
 
 			// Room routes
 			r.Route("/rooms", func(r chi.Router) {

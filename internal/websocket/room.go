@@ -852,3 +852,116 @@ func (r *Room) handleRejectEdit(client *Client) {
 	}
 }
 
+// GetID returns the room's UUID
+func (r *Room) GetID() uuid.UUID {
+	return r.id
+}
+
+// GetShortCode returns the room's short code
+func (r *Room) GetShortCode() string {
+	return r.shortCode
+}
+
+// GetPendingActionForUser returns the pending action for a user in this room, if any
+func (r *Room) GetPendingActionForUser(userID uuid.UUID) *DraftPendingAction {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	state := r.getDraftState()
+
+	// If draft is not started or is complete, no pending action
+	if !state.Started || state.IsComplete {
+		return nil
+	}
+
+	// Check if user is a participant in this room
+	isParticipant := false
+	userSide := ""
+
+	if r.isTeamDraft {
+		// In team draft mode, check if user is a room player
+		if player, ok := r.roomPlayers[userID]; ok {
+			isParticipant = true
+			userSide = string(player.Team)
+		}
+	} else {
+		// In 1v1 mode, check if user is blue or red client
+		if r.blueClient != nil && r.blueClient.userID == userID {
+			isParticipant = true
+			userSide = "blue"
+		} else if r.redClient != nil && r.redClient.userID == userID {
+			isParticipant = true
+			userSide = "red"
+		}
+	}
+
+	if !isParticipant {
+		return nil
+	}
+
+	action := &DraftPendingAction{
+		RoomID:       r.id.String(),
+		RoomCode:     r.shortCode,
+		CurrentPhase: state.CurrentPhase,
+	}
+
+	// Check if paused with pending edit
+	if r.pauseMgr.IsPaused() {
+		// Check if there's a pending edit that needs user's approval
+		if r.editMgr.HasPendingEdit() {
+			pendingEdit := r.editMgr.GetPendingEdit()
+			// Check if user needs to confirm the edit (opposite side from proposer)
+			if pendingEdit.ProposedSide != userSide {
+				action.ActionType = "pending_edit"
+				action.IsYourTurn = true
+				return action
+			}
+		}
+
+		// Check if waiting for resume ready
+		blueReady, redReady := r.pauseMgr.GetResumeReady()
+		needsResume := false
+		if userSide == "blue" && !blueReady {
+			needsResume = true
+		} else if userSide == "red" && !redReady {
+			needsResume = true
+		}
+		if needsResume {
+			action.ActionType = "ready_to_resume"
+			action.IsYourTurn = true
+			return action
+		}
+
+		// If paused but no action needed, return nil
+		return nil
+	}
+
+	// Check if it's user's turn for pick/ban
+	phase := domain.GetPhase(state.CurrentPhase)
+	if phase == nil {
+		return nil
+	}
+
+	currentSide := string(phase.Team)
+	isYourTurn := false
+
+	if r.isTeamDraft {
+		// In team draft mode, only captain can act
+		isYourTurn = r.isCaptain(userID, currentSide) && userSide == currentSide
+	} else {
+		// In 1v1 mode
+		isYourTurn = userSide == currentSide
+	}
+
+	action.ActionType = string(phase.ActionType)
+	action.IsYourTurn = isYourTurn
+	action.TimerRemaining = r.timerMgr.GetRemaining()
+
+	// Only return action if it's the user's turn
+	if isYourTurn {
+		return action
+	}
+
+	return nil
+}
+

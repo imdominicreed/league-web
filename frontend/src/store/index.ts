@@ -5,6 +5,7 @@ import championsReducer from './slices/championsSlice'
 import roomReducer from './slices/roomSlice'
 import profileReducer from './slices/profileSlice'
 import lobbyReducer from './slices/lobbySlice'
+import pendingActionsReducer from './slices/pendingActionsSlice'
 
 export const store = configureStore({
   reducer: {
@@ -14,6 +15,7 @@ export const store = configureStore({
     room: roomReducer,
     profile: profileReducer,
     lobby: lobbyReducer,
+    pendingActions: pendingActionsReducer,
   },
 })
 

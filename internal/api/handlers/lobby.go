@@ -969,13 +969,21 @@ func (h *LobbyHandler) CancelPendingAction(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *LobbyHandler) GetPendingAction(w http.ResponseWriter, r *http.Request) {
-	lobbyID, err := uuid.Parse(chi.URLParam(r, "id"))
+	idOrCode := chi.URLParam(r, "id")
+
+	// First try to get the lobby to resolve the ID
+	lobby, err := h.lobbyService.GetLobby(r.Context(), idOrCode)
 	if err != nil {
-		http.Error(w, "Invalid lobby ID", http.StatusBadRequest)
+		if errors.Is(err, service.ErrLobbyNotFound) {
+			http.Error(w, "Lobby not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("ERROR [lobby.GetPendingAction] failed to get lobby: %v", err)
+		http.Error(w, "Failed to get lobby", http.StatusInternalServerError)
 		return
 	}
 
-	action, err := h.lobbyService.GetPendingAction(r.Context(), lobbyID)
+	action, err := h.lobbyService.GetPendingAction(r.Context(), lobby.ID)
 	if err != nil {
 		log.Printf("ERROR [lobby.GetPendingAction] failed: %v", err)
 		http.Error(w, "Failed to get pending action", http.StatusInternalServerError)
