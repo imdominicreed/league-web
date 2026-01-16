@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// defaultTimeout is used for all message expectations in tests
 const defaultTimeout = 5 * time.Second
 
 func TestDraftFlow_JoinRoom(t *testing.T) {
@@ -37,9 +38,6 @@ func TestDraftFlow_JoinRoom(t *testing.T) {
 	assert.Equal(t, room.ID.String(), stateSync.Room.ID)
 	assert.Equal(t, "waiting", stateSync.Room.Status)
 	assert.Equal(t, "blue", stateSync.YourSide)
-
-	// Drain any additional messages before test ends
-	wsClient.DrainMessages()
 }
 
 func TestDraftFlow_ReadyUp(t *testing.T) {
@@ -69,29 +67,31 @@ func TestDraftFlow_ReadyUp(t *testing.T) {
 	redClient.JoinRoom(room.ID.String(), "red")
 	redClient.ExpectStateSync(defaultTimeout)
 
-	// Drain join notifications before testing ready
-	time.Sleep(100 * time.Millisecond)
+	// Drain join notifications - DrainMessages now properly waits for messages to settle
 	blueClient.DrainMessages()
 	redClient.DrainMessages()
 
 	// Blue player readies up
 	blueClient.Ready(true)
-	blueUpdate := blueClient.ExpectPlayerUpdate(defaultTimeout)
-	assert.Equal(t, "blue", blueUpdate.Side)
+	blueUpdate := blueClient.ExpectPlayerUpdateForSide("blue", defaultTimeout)
 	assert.Equal(t, "ready_changed", blueUpdate.Action)
 	assert.True(t, blueUpdate.Player.Ready)
 
-	// Drain blue's ready notification from red client before red readies
-	time.Sleep(100 * time.Millisecond)
+	// Red should also receive blue's ready notification
+	redClient.ExpectPlayerUpdateForSide("blue", defaultTimeout)
+
+	// Drain any extra messages before red readies
 	blueClient.DrainMessages()
 	redClient.DrainMessages()
 
 	// Red player readies up
 	redClient.Ready(true)
-	redUpdate := redClient.ExpectPlayerUpdate(defaultTimeout)
-	assert.Equal(t, "red", redUpdate.Side)
+	redUpdate := redClient.ExpectPlayerUpdateForSide("red", defaultTimeout)
 	assert.Equal(t, "ready_changed", redUpdate.Action)
 	assert.True(t, redUpdate.Player.Ready)
+
+	// Blue should also receive red's ready notification
+	blueClient.ExpectPlayerUpdateForSide("red", defaultTimeout)
 }
 
 func TestDraftFlow_StartDraft(t *testing.T) {
@@ -120,23 +120,31 @@ func TestDraftFlow_StartDraft(t *testing.T) {
 	redClient.JoinRoom(room.ID.String(), "red")
 	redClient.ExpectStateSync(defaultTimeout)
 
-	// Both ready up
-	blueClient.Ready(true)
+	// Drain join notifications
 	blueClient.DrainMessages()
 	redClient.DrainMessages()
 
+	// Both ready up - expect player updates to broadcast
+	blueClient.Ready(true)
+	blueClient.ExpectPlayerUpdateForSide("blue", defaultTimeout)
+	redClient.ExpectPlayerUpdateForSide("blue", defaultTimeout)
+
 	redClient.Ready(true)
-	blueClient.DrainMessages()
-	redClient.DrainMessages()
+	redClient.ExpectPlayerUpdateForSide("red", defaultTimeout)
+	blueClient.ExpectPlayerUpdateForSide("red", defaultTimeout)
 
 	// Start draft
 	blueClient.StartDraft()
 
-	// Expect draft started
+	// Both clients should receive draft started
 	draftStarted := blueClient.ExpectDraftStarted(defaultTimeout)
 	assert.Equal(t, 0, draftStarted.CurrentPhase)
 	assert.Equal(t, "blue", draftStarted.CurrentTeam)
 	assert.Equal(t, "ban", draftStarted.ActionType)
+
+	// Red should also receive draft started
+	redDraftStarted := redClient.ExpectDraftStarted(defaultTimeout)
+	assert.Equal(t, 0, redDraftStarted.CurrentPhase)
 }
 
 func TestDraftFlow_SelectAndLockIn(t *testing.T) {
@@ -165,12 +173,20 @@ func TestDraftFlow_SelectAndLockIn(t *testing.T) {
 	redClient.JoinRoom(room.ID.String(), "red")
 	redClient.ExpectStateSync(defaultTimeout)
 
-	// Ready up and start
-	blueClient.Ready(true)
-	redClient.Ready(true)
+	// Drain join notifications
 	blueClient.DrainMessages()
 	redClient.DrainMessages()
 
+	// Ready up - wait for broadcasts
+	blueClient.Ready(true)
+	blueClient.ExpectPlayerUpdateForSide("blue", defaultTimeout)
+	redClient.ExpectPlayerUpdateForSide("blue", defaultTimeout)
+
+	redClient.Ready(true)
+	redClient.ExpectPlayerUpdateForSide("red", defaultTimeout)
+	blueClient.ExpectPlayerUpdateForSide("red", defaultTimeout)
+
+	// Start draft
 	blueClient.StartDraft()
 	blueClient.ExpectDraftStarted(defaultTimeout)
 	redClient.ExpectDraftStarted(defaultTimeout)
@@ -181,18 +197,24 @@ func TestDraftFlow_SelectAndLockIn(t *testing.T) {
 	// Lock in
 	blueClient.LockIn()
 
-	// Expect champion selected
+	// Both clients should receive champion selected
 	selected := blueClient.ExpectChampionSelected(defaultTimeout)
 	assert.Equal(t, 0, selected.Phase)
 	assert.Equal(t, "blue", selected.Team)
 	assert.Equal(t, "ban", selected.ActionType)
 	assert.Equal(t, champions[0].ID, selected.ChampionID)
 
-	// Expect phase changed
+	// Red should also receive champion selected
+	redClient.ExpectChampionSelected(defaultTimeout)
+
+	// Both clients should receive phase changed
 	phaseChanged := blueClient.ExpectPhaseChanged(defaultTimeout)
 	assert.Equal(t, 1, phaseChanged.CurrentPhase)
 	assert.Equal(t, "red", phaseChanged.CurrentTeam)
 	assert.Equal(t, "ban", phaseChanged.ActionType)
+
+	// Red should also receive phase changed
+	redClient.ExpectPhaseChanged(defaultTimeout)
 }
 
 func TestDraftFlow_WrongTurnError(t *testing.T) {
@@ -221,19 +243,23 @@ func TestDraftFlow_WrongTurnError(t *testing.T) {
 	redClient.JoinRoom(room.ID.String(), "red")
 	redClient.ExpectStateSync(defaultTimeout)
 
-	// Ready up
-	blueClient.Ready(true)
-	time.Sleep(100 * time.Millisecond)
-	redClient.Ready(true)
-	time.Sleep(100 * time.Millisecond)
+	// Drain join notifications
 	blueClient.DrainMessages()
 	redClient.DrainMessages()
 
-	// Start draft
+	// Ready up - wait for broadcasts
+	blueClient.Ready(true)
+	blueClient.ExpectPlayerUpdateForSide("blue", defaultTimeout)
+	redClient.ExpectPlayerUpdateForSide("blue", defaultTimeout)
+
+	redClient.Ready(true)
+	redClient.ExpectPlayerUpdateForSide("red", defaultTimeout)
+	blueClient.ExpectPlayerUpdateForSide("red", defaultTimeout)
+
+	// Start draft and wait for both clients to receive it
 	blueClient.StartDraft()
-	time.Sleep(200 * time.Millisecond)
-	blueClient.DrainMessages()
-	redClient.DrainMessages()
+	blueClient.ExpectDraftStarted(defaultTimeout)
+	redClient.ExpectDraftStarted(defaultTimeout)
 
 	// Red tries to select on blue's turn (phase 0 is blue's turn)
 	redClient.SelectChampion(champions[0].ID)
@@ -269,26 +295,33 @@ func TestDraftFlow_ChampionUnavailable(t *testing.T) {
 	redClient.JoinRoom(room.ID.String(), "red")
 	redClient.ExpectStateSync(defaultTimeout)
 
-	// Ready up
-	blueClient.Ready(true)
-	time.Sleep(100 * time.Millisecond)
-	redClient.Ready(true)
-	time.Sleep(100 * time.Millisecond)
+	// Drain join notifications
 	blueClient.DrainMessages()
 	redClient.DrainMessages()
 
+	// Ready up - wait for broadcasts
+	blueClient.Ready(true)
+	blueClient.ExpectPlayerUpdateForSide("blue", defaultTimeout)
+	redClient.ExpectPlayerUpdateForSide("blue", defaultTimeout)
+
+	redClient.Ready(true)
+	redClient.ExpectPlayerUpdateForSide("red", defaultTimeout)
+	blueClient.ExpectPlayerUpdateForSide("red", defaultTimeout)
+
 	// Start draft
 	blueClient.StartDraft()
-	time.Sleep(200 * time.Millisecond)
-	blueClient.DrainMessages()
-	redClient.DrainMessages()
+	blueClient.ExpectDraftStarted(defaultTimeout)
+	redClient.ExpectDraftStarted(defaultTimeout)
 
 	// Blue bans a champion
 	blueClient.SelectChampion(champions[0].ID)
 	blueClient.LockIn()
-	time.Sleep(200 * time.Millisecond)
-	blueClient.DrainMessages()
-	redClient.DrainMessages()
+
+	// Both clients receive champion selected and phase changed
+	blueClient.ExpectChampionSelected(defaultTimeout)
+	redClient.ExpectChampionSelected(defaultTimeout)
+	blueClient.ExpectPhaseChanged(defaultTimeout)
+	redClient.ExpectPhaseChanged(defaultTimeout)
 
 	// Red tries to ban the same champion
 	redClient.SelectChampion(champions[0].ID)
@@ -298,7 +331,7 @@ func TestDraftFlow_ChampionUnavailable(t *testing.T) {
 	assert.Contains(t, errorPayload.Message, "already picked or banned")
 }
 
-func TestDraftFlow_NoSelection_UsesNone(t *testing.T) {
+func TestDraftFlow_NoSelectionError(t *testing.T) {
 	ts := testutil.NewTestServer(t)
 
 	// Create users
@@ -324,28 +357,30 @@ func TestDraftFlow_NoSelection_UsesNone(t *testing.T) {
 	redClient.JoinRoom(room.ID.String(), "red")
 	redClient.ExpectStateSync(defaultTimeout)
 
-	// Ready up
-	blueClient.Ready(true)
-	time.Sleep(100 * time.Millisecond)
-	redClient.Ready(true)
-	time.Sleep(100 * time.Millisecond)
+	// Drain join notifications
 	blueClient.DrainMessages()
 	redClient.DrainMessages()
+
+	// Ready up - wait for broadcasts
+	blueClient.Ready(true)
+	blueClient.ExpectPlayerUpdateForSide("blue", defaultTimeout)
+	redClient.ExpectPlayerUpdateForSide("blue", defaultTimeout)
+
+	redClient.Ready(true)
+	redClient.ExpectPlayerUpdateForSide("red", defaultTimeout)
+	blueClient.ExpectPlayerUpdateForSide("red", defaultTimeout)
 
 	// Start draft
 	blueClient.StartDraft()
-	time.Sleep(200 * time.Millisecond)
-	blueClient.DrainMessages()
-	redClient.DrainMessages()
+	blueClient.ExpectDraftStarted(defaultTimeout)
+	redClient.ExpectDraftStarted(defaultTimeout)
 
-	// Blue locks in without selecting - should use "None"
+	// Blue tries to lock in without selecting
 	blueClient.LockIn()
 
-	// Expect champion selected with "None"
-	selected := blueClient.ExpectChampionSelected(defaultTimeout)
-	assert.Equal(t, "None", selected.ChampionID)
-	assert.Equal(t, "ban", selected.ActionType)
-	assert.Equal(t, "blue", selected.Team)
+	// Expect error
+	errorPayload := blueClient.ExpectErrorWithCode("NO_SELECTION", defaultTimeout)
+	assert.Contains(t, errorPayload.Message, "No champion selected")
 }
 
 func TestDraftFlow_FullDraft(t *testing.T) {
@@ -382,10 +417,18 @@ func TestDraftFlow_FullDraft(t *testing.T) {
 	redClient.JoinRoom(room.ID.String(), "red")
 	redClient.ExpectStateSync(defaultTimeout)
 
-	blueClient.Ready(true)
-	redClient.Ready(true)
+	// Drain join notifications
 	blueClient.DrainMessages()
 	redClient.DrainMessages()
+
+	// Ready up with proper synchronization
+	blueClient.Ready(true)
+	blueClient.ExpectPlayerUpdateForSide("blue", defaultTimeout)
+	redClient.ExpectPlayerUpdateForSide("blue", defaultTimeout)
+
+	redClient.Ready(true)
+	redClient.ExpectPlayerUpdateForSide("red", defaultTimeout)
+	blueClient.ExpectPlayerUpdateForSide("red", defaultTimeout)
 
 	blueClient.StartDraft()
 	blueClient.ExpectDraftStarted(defaultTimeout)
@@ -432,6 +475,7 @@ func TestDraftFlow_FullDraft(t *testing.T) {
 
 	// Expect draft completed
 	completed := blueClient.ExpectDraftCompleted(defaultTimeout)
+	redClient.ExpectDraftCompleted(defaultTimeout)
 
 	// Verify final state
 	assert.Len(t, completed.BlueBans, 5)
@@ -479,30 +523,38 @@ func TestDraftFlow_SpectatorView(t *testing.T) {
 	assert.Equal(t, "spectator", stateSync.YourSide)
 	assert.GreaterOrEqual(t, stateSync.SpectatorCount, 1)
 
-	// Ready up
-	blueClient.Ready(true)
-	time.Sleep(100 * time.Millisecond)
-	redClient.Ready(true)
-	time.Sleep(100 * time.Millisecond)
+	// Drain any join notifications
 	blueClient.DrainMessages()
 	redClient.DrainMessages()
 	spectatorClient.DrainMessages()
 
-	// Start draft
-	blueClient.StartDraft()
-	time.Sleep(200 * time.Millisecond)
+	// Ready up - all clients receive player updates
+	blueClient.Ready(true)
+	blueClient.ExpectPlayerUpdateForSide("blue", defaultTimeout)
+	redClient.ExpectPlayerUpdateForSide("blue", defaultTimeout)
+	spectatorClient.ExpectPlayerUpdateForSide("blue", defaultTimeout)
 
-	// Spectator should have received messages, drain first
-	spectatorClient.DrainMessages()
+	redClient.Ready(true)
+	redClient.ExpectPlayerUpdateForSide("red", defaultTimeout)
+	blueClient.ExpectPlayerUpdateForSide("red", defaultTimeout)
+	spectatorClient.ExpectPlayerUpdateForSide("red", defaultTimeout)
+
+	// Start draft - all clients receive draft started
+	blueClient.StartDraft()
+	blueClient.ExpectDraftStarted(defaultTimeout)
+	redClient.ExpectDraftStarted(defaultTimeout)
+	spectatorClient.ExpectDraftStarted(defaultTimeout)
 
 	// Blue makes a selection
 	blueClient.SelectChampion(champions[0].ID)
 	blueClient.LockIn()
 
-	// Give time for message propagation
-	time.Sleep(200 * time.Millisecond)
-
-	// Spectator receives champion selected and phase changed
+	// All clients receive champion selected and phase changed
+	blueClient.ExpectChampionSelected(defaultTimeout)
+	redClient.ExpectChampionSelected(defaultTimeout)
 	spectatorClient.ExpectChampionSelected(defaultTimeout)
+
+	blueClient.ExpectPhaseChanged(defaultTimeout)
+	redClient.ExpectPhaseChanged(defaultTimeout)
 	spectatorClient.ExpectPhaseChanged(defaultTimeout)
 }
