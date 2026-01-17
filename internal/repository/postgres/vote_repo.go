@@ -82,3 +82,33 @@ func (r *voteRepository) DeleteByLobbyAndUser(ctx context.Context, lobbyID, user
 		Where("lobby_id = ? AND user_id = ?", lobbyID, userID).
 		Delete(&domain.Vote{}).Error
 }
+
+func (r *voteRepository) GetByLobbyUserAndOption(ctx context.Context, lobbyID, userID uuid.UUID, optionNumber int) (*domain.Vote, error) {
+	var vote domain.Vote
+	err := r.db.WithContext(ctx).
+		Where("lobby_id = ? AND user_id = ? AND match_option_num = ?", lobbyID, userID, optionNumber).
+		First(&vote).Error
+	if err != nil {
+		return nil, err
+	}
+	return &vote, nil
+}
+
+func (r *voteRepository) DeleteByLobbyUserAndOption(ctx context.Context, lobbyID, userID uuid.UUID, optionNumber int) error {
+	return r.db.WithContext(ctx).
+		Where("lobby_id = ? AND user_id = ? AND match_option_num = ?", lobbyID, userID, optionNumber).
+		Delete(&domain.Vote{}).Error
+}
+
+func (r *voteRepository) GetUserVoteOptions(ctx context.Context, lobbyID, userID uuid.UUID) ([]int, error) {
+	var options []int
+	err := r.db.WithContext(ctx).
+		Model(&domain.Vote{}).
+		Select("match_option_num").
+		Where("lobby_id = ? AND user_id = ?", lobbyID, userID).
+		Pluck("match_option_num", &options).Error
+	if err != nil {
+		return nil, err
+	}
+	return options, nil
+}

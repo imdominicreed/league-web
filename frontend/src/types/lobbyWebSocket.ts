@@ -164,6 +164,7 @@ export interface VoteCastPayload {
   userId: string
   displayName: string
   optionNumber: number
+  voteAdded: boolean // true if vote was added, false if removed
   voteCounts: Record<number, number>
   votesCast: number
   voters: Record<number, VoterInfoPayload[]>

@@ -418,7 +418,7 @@ export default function LobbyRoom() {
                   voteCount={votingStatus?.voteCounts?.[opt.optionNumber] || 0}
                   totalVotes={votingStatus?.votesCast || 0}
                   isVotingEnabled={lobby.votingEnabled && lobby.status === 'matchmaking'}
-                  userVote={votingStatus?.userVote}
+                  userVotes={votingStatus?.userVotes}
                   voters={votingStatus?.voters?.[opt.optionNumber]}
                 />
               ))}

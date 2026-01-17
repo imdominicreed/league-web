@@ -313,12 +313,36 @@ const lobbySlice = createSlice({
         state.lobby.status = 'team_selected'
       }
     },
-    updateVoteCounts: (state, action: PayloadAction<{ voteCounts: Record<number, number>; votesCast: number; voters?: Record<number, { userId: string; displayName: string }[]> }>) => {
+    updateVoteCounts: (state, action: PayloadAction<{
+      voteCounts: Record<number, number>
+      votesCast: number
+      voters?: Record<number, { userId: string; displayName: string }[]>
+      // For updating current user's votes
+      votingUserId?: string
+      optionNumber?: number
+      voteAdded?: boolean
+      currentUserId?: string
+    }>) => {
       if (state.votingStatus) {
         state.votingStatus.voteCounts = action.payload.voteCounts
         state.votingStatus.votesCast = action.payload.votesCast
         if (action.payload.voters) {
           state.votingStatus.voters = action.payload.voters
+        }
+        // Update userVotes if this is the current user's vote action
+        if (action.payload.votingUserId && action.payload.currentUserId &&
+            action.payload.votingUserId === action.payload.currentUserId &&
+            action.payload.optionNumber !== undefined && action.payload.voteAdded !== undefined) {
+          const userVotes = state.votingStatus.userVotes || []
+          if (action.payload.voteAdded) {
+            // Add the option if not already present
+            if (!userVotes.includes(action.payload.optionNumber)) {
+              state.votingStatus.userVotes = [...userVotes, action.payload.optionNumber]
+            }
+          } else {
+            // Remove the option
+            state.votingStatus.userVotes = userVotes.filter(opt => opt !== action.payload.optionNumber)
+          }
         }
       }
     },

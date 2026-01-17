@@ -49,7 +49,7 @@ const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${win
 
 export function useLobbyWebSocket(lobbyId: string | undefined) {
   const dispatch = useDispatch()
-  const { accessToken } = useSelector((state: RootState) => state.auth)
+  const { accessToken, user } = useSelector((state: RootState) => state.auth)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const handleMessageRef = useRef<((msg: LobbyWSMessage) => void) | null>(null)
@@ -148,8 +148,13 @@ export function useLobbyWebSocket(lobbyId: string | undefined) {
       voteCounts: payload.voteCounts,
       votesCast: payload.votesCast,
       voters,
+      // Pass vote info for updating current user's votes
+      votingUserId: payload.userId,
+      optionNumber: payload.optionNumber,
+      voteAdded: payload.voteAdded,
+      currentUserId: user?.id,
     }))
-  }, [dispatch])
+  }, [dispatch, user?.id])
 
   // Handler for action proposed
   const handleActionProposed = useCallback((payload: ActionProposedPayload) => {

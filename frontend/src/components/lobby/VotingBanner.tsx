@@ -76,13 +76,6 @@ export function VotingBanner({
               <span className="text-gray-500">({votingProgress}%)</span>
             </div>
 
-            {votingStatus.userVote !== undefined && (
-              <div className="flex items-center gap-2">
-                <span className="text-gray-400">Your vote:</span>
-                <span className="text-purple-400 font-medium">Option {votingStatus.userVote}</span>
-              </div>
-            )}
-
             {timeRemaining && (
               <div className="flex items-center gap-2">
                 <span className="text-gray-400">Time:</span>

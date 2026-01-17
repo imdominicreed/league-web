@@ -116,10 +116,13 @@ type VoteRepository interface {
 	Create(ctx context.Context, vote *domain.Vote) error
 	Update(ctx context.Context, vote *domain.Vote) error
 	GetByLobbyAndUser(ctx context.Context, lobbyID, userID uuid.UUID) (*domain.Vote, error)
+	GetByLobbyUserAndOption(ctx context.Context, lobbyID, userID uuid.UUID, optionNumber int) (*domain.Vote, error)
 	GetVotesByLobby(ctx context.Context, lobbyID uuid.UUID) ([]*domain.Vote, error)
 	GetVoteCounts(ctx context.Context, lobbyID uuid.UUID) (map[int]int, error)
+	GetUserVoteOptions(ctx context.Context, lobbyID, userID uuid.UUID) ([]int, error)
 	DeleteByLobby(ctx context.Context, lobbyID uuid.UUID) error
 	DeleteByLobbyAndUser(ctx context.Context, lobbyID, userID uuid.UUID) error
+	DeleteByLobbyUserAndOption(ctx context.Context, lobbyID, userID uuid.UUID, optionNumber int) error
 }
 
 type Repositories struct {

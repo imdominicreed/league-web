@@ -13,7 +13,7 @@ type LobbyState struct {
 
 	mu            sync.RWMutex
 	clients       map[*LobbyClient]bool
-	votes         map[uuid.UUID]*InMemoryVote       // userID -> vote
+	votes         map[uuid.UUID]map[int]bool // userID -> optionNumbers (set)
 	pendingAction *InMemoryPendingAction
 }
 
@@ -22,7 +22,7 @@ func NewLobbyState(lobbyID uuid.UUID) *LobbyState {
 	return &LobbyState{
 		lobbyID: lobbyID,
 		clients: make(map[*LobbyClient]bool),
-		votes:   make(map[uuid.UUID]*InMemoryVote),
+		votes:   make(map[uuid.UUID]map[int]bool),
 	}
 }
 
@@ -83,35 +83,60 @@ func (s *LobbyState) SendToUser(userID uuid.UUID, msg *LobbyMessage) {
 
 // ============== Vote Management ==============
 
-// CastVote records a vote (or updates an existing one)
+// ToggleVote toggles a vote for a user on an option. Returns true if vote was added, false if removed.
+func (s *LobbyState) ToggleVote(userID uuid.UUID, optionNumber int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.votes[userID] == nil {
+		s.votes[userID] = make(map[int]bool)
+	}
+
+	if s.votes[userID][optionNumber] {
+		// Already voted, remove the vote
+		delete(s.votes[userID], optionNumber)
+		return false
+	}
+
+	// Add the vote
+	s.votes[userID][optionNumber] = true
+	return true
+}
+
+// CastVote records a vote (for backwards compatibility, always adds)
 func (s *LobbyState) CastVote(userID uuid.UUID, optionNumber int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.votes[userID] = &InMemoryVote{
-		UserID:       userID,
-		OptionNumber: optionNumber,
-		CastAt:       time.Now(),
+	if s.votes[userID] == nil {
+		s.votes[userID] = make(map[int]bool)
 	}
+	s.votes[userID][optionNumber] = true
 }
 
-// GetVote returns a user's vote
-func (s *LobbyState) GetVote(userID uuid.UUID) *InMemoryVote {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.votes[userID]
-}
-
-// GetVotes returns all votes as userID -> optionNumber map
-func (s *LobbyState) GetVotes() map[string]int {
+// HasVoted checks if a user has voted for a specific option
+func (s *LobbyState) HasVoted(userID uuid.UUID, optionNumber int) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	result := make(map[string]int)
-	for userID, vote := range s.votes {
-		result[userID.String()] = vote.OptionNumber
+	if s.votes[userID] == nil {
+		return false
 	}
-	return result
+	return s.votes[userID][optionNumber]
+}
+
+// GetUserVotes returns all options a user has voted for
+func (s *LobbyState) GetUserVotes(userID uuid.UUID) []int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var options []int
+	if s.votes[userID] != nil {
+		for opt := range s.votes[userID] {
+			options = append(options, opt)
+		}
+	}
+	return options
 }
 
 // GetVoteCounts returns vote counts per option
@@ -120,8 +145,10 @@ func (s *LobbyState) GetVoteCounts() map[int]int {
 	defer s.mu.RUnlock()
 
 	counts := make(map[int]int)
-	for _, vote := range s.votes {
-		counts[vote.OptionNumber]++
+	for _, userVotes := range s.votes {
+		for optionNumber := range userVotes {
+			counts[optionNumber]++
+		}
 	}
 	return counts
 }
@@ -130,14 +157,19 @@ func (s *LobbyState) GetVoteCounts() map[int]int {
 func (s *LobbyState) GetTotalVotes() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return len(s.votes)
+
+	total := 0
+	for _, userVotes := range s.votes {
+		total += len(userVotes)
+	}
+	return total
 }
 
 // ClearVotes clears all votes
 func (s *LobbyState) ClearVotes() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.votes = make(map[uuid.UUID]*InMemoryVote)
+	s.votes = make(map[uuid.UUID]map[int]bool)
 }
 
 // GetVotersByOption returns voters grouped by option number
@@ -146,10 +178,21 @@ func (s *LobbyState) GetVotersByOption() map[int][]uuid.UUID {
 	defer s.mu.RUnlock()
 
 	result := make(map[int][]uuid.UUID)
-	for userID, vote := range s.votes {
-		result[vote.OptionNumber] = append(result[vote.OptionNumber], userID)
+	for userID, userVotes := range s.votes {
+		for optionNumber := range userVotes {
+			result[optionNumber] = append(result[optionNumber], userID)
+		}
 	}
 	return result
+}
+
+// GetVotes returns all votes as userID -> list of option numbers (for state sync compatibility)
+func (s *LobbyState) GetVotes() map[string]int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Return empty map - this field is deprecated, use GetVotersByOption instead
+	return make(map[string]int)
 }
 
 // ============== Pending Action Management ==============

@@ -443,6 +443,11 @@ func (r *Room) handleLockIn(client *Client) {
 		return
 	}
 
+	if r.pauseMgr.IsPaused() {
+		client.sendError("INVALID_STATE", "Cannot lock in while paused")
+		return
+	}
+
 	phase := domain.GetPhase(r.getDraftState().CurrentPhase)
 	if phase == nil {
 		return

@@ -271,21 +271,23 @@ export default function ChampionGrid({ onSelect, onLockIn, onHover, onProposeEdi
         </div>
       </div>
 
-      {/* Lock In Button */}
-      <div className="mt-8 mb-4 flex justify-center">
-        <button
-          onClick={handleLockIn}
-          disabled={!selectedChampion || !isYourTurn || disabled}
-          className={`px-8 py-2 rounded font-beaufort font-bold uppercase tracking-wider text-sm transition-all ${
-            selectedChampion && isYourTurn && !disabled
-              ? 'bg-lol-gold text-lol-dark hover:brightness-110 shadow-[0_0_15px_rgba(200,170,110,0.3)]'
-              : 'bg-lol-gray border border-lol-border text-gray-500 cursor-not-allowed'
-          }`}
-          data-testid="draft-button-lock-in"
-        >
-          Lock In
-        </button>
-      </div>
+      {/* Lock In Button - hidden during pause/edit mode */}
+      {!draft.isPaused && (
+        <div className="mt-8 mb-4 flex justify-center">
+          <button
+            onClick={handleLockIn}
+            disabled={!selectedChampion || !isYourTurn || disabled}
+            className={`px-8 py-2 rounded font-beaufort font-bold uppercase tracking-wider text-sm transition-all ${
+              selectedChampion && isYourTurn && !disabled
+                ? 'bg-lol-gold text-lol-dark hover:brightness-110 shadow-[0_0_15px_rgba(200,170,110,0.3)]'
+                : 'bg-lol-gray border border-lol-border text-gray-500 cursor-not-allowed'
+            }`}
+            data-testid="draft-button-lock-in"
+          >
+            Lock In
+          </button>
+        </div>
+      )}
     </div>
   )
 }

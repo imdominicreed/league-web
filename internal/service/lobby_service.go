@@ -1463,17 +1463,15 @@ func (s *LobbyService) CastVote(ctx context.Context, lobbyID, userID uuid.UUID, 
 		return nil, err
 	}
 
-	// Check if user already voted
-	existingVote, err := s.voteRepo.GetByLobbyAndUser(ctx, lobbyID, userID)
+	// Toggle vote: if already voted for this option, remove it; otherwise add it
+	existingVote, err := s.voteRepo.GetByLobbyUserAndOption(ctx, lobbyID, userID, optionNumber)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
 
 	if existingVote != nil {
-		// Update existing vote
-		existingVote.MatchOptionNum = optionNumber
-		existingVote.UpdatedAt = time.Now()
-		if err := s.voteRepo.Update(ctx, existingVote); err != nil {
+		// Remove existing vote
+		if err := s.voteRepo.DeleteByLobbyUserAndOption(ctx, lobbyID, userID, optionNumber); err != nil {
 			return nil, err
 		}
 	} else {
@@ -1553,13 +1551,11 @@ func (s *LobbyService) GetVotingStatus(ctx context.Context, lobbyID uuid.UUID, u
 		Voters:        voters,
 	}
 
-	// Get user's vote if userID provided
+	// Get user's votes if userID provided (user can vote for multiple options)
 	if userID != nil {
-		for _, v := range votes {
-			if v.UserID == *userID {
-				status.UserVote = &v.MatchOptionNum
-				break
-			}
+		userVotes, err := s.voteRepo.GetUserVoteOptions(ctx, lobbyID, *userID)
+		if err == nil && len(userVotes) > 0 {
+			status.UserVotes = userVotes
 		}
 	}
 

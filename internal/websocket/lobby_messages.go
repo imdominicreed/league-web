@@ -200,6 +200,7 @@ type VoteCastPayload struct {
 	UserID       string                     `json:"userId"`
 	DisplayName  string                     `json:"displayName"`
 	OptionNumber int                        `json:"optionNumber"`
+	VoteAdded    bool                       `json:"voteAdded"` // true if vote was added, false if removed
 	VoteCounts   map[int]int                `json:"voteCounts"`
 	VotesCast    int                        `json:"votesCast"`
 	Voters       map[int][]VoterInfoPayload `json:"voters"`

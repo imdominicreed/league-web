@@ -156,7 +156,7 @@ type VotingStatusResponse struct {
 	VotesCast     int                         `json:"votesCast"`
 	VoteCounts    map[int]int                 `json:"voteCounts"`
 	Voters        map[int][]VoterInfoResponse `json:"voters"`
-	UserVote      *int                        `json:"userVote,omitempty"`
+	UserVotes     []int                       `json:"userVotes,omitempty"`
 	WinningOption *int                        `json:"winningOption,omitempty"`
 	CanFinalize   bool                        `json:"canFinalize"`
 }
@@ -1469,7 +1469,7 @@ func toVotingStatusResponse(status *domain.VotingStatus) VotingStatusResponse {
 		VotesCast:     status.VotesCast,
 		VoteCounts:    voteCounts,
 		Voters:        voters,
-		UserVote:      status.UserVote,
+		UserVotes:     status.UserVotes,
 		WinningOption: status.WinningOption,
 		CanFinalize:   status.CanFinalize,
 	}

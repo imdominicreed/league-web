@@ -49,7 +49,7 @@ type VotingStatus struct {
 	VotesCast     int                   `json:"votesCast"`
 	VoteCounts    map[int]int           `json:"voteCounts"`
 	Voters        map[int][]VoterInfo   `json:"voters"` // option number -> list of voters
-	UserVote      *int                  `json:"userVote,omitempty"`
+	UserVotes     []int                 `json:"userVotes,omitempty"` // options the user has voted for
 	WinningOption *int                  `json:"winningOption,omitempty"`
 	CanFinalize   bool                  `json:"canFinalize"`
 }

@@ -8,7 +8,7 @@ interface MatchOptionCardProps {
   voteCount?: number
   totalVotes?: number
   isVotingEnabled?: boolean
-  userVote?: number
+  userVotes?: number[] // options the user has voted for
   voters?: VoterInfo[]
 }
 
@@ -35,10 +35,10 @@ export function MatchOptionCard({
   voteCount,
   totalVotes,
   isVotingEnabled,
-  userVote,
+  userVotes,
   voters,
 }: MatchOptionCardProps) {
-  const isUserVote = userVote === option.optionNumber
+  const hasUserVoted = userVotes?.includes(option.optionNumber) ?? false
   const votePercentage = totalVotes && totalVotes > 0 ? Math.round((voteCount || 0) / totalVotes * 100) : 0
   const blueTeam = option.assignments.filter(a => a.team === 'blue')
   const redTeam = option.assignments.filter(a => a.team === 'red')
@@ -94,7 +94,7 @@ export function MatchOptionCard({
 
   const borderClass = isSelected
     ? 'border-lol-gold shadow-lg shadow-lol-gold/20'
-    : isUserVote && isVotingEnabled
+    : hasUserVoted && isVotingEnabled
     ? 'border-purple-500 shadow-lg shadow-purple-500/20'
     : 'border-gray-700 hover:border-gray-600'
 
@@ -107,7 +107,7 @@ export function MatchOptionCard({
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2">
           <span className="text-lg font-bold text-white">Option {option.optionNumber}</span>
-          {isUserVote && isVotingEnabled && (
+          {hasUserVoted && isVotingEnabled && (
             <span className="bg-purple-600/20 text-purple-400 px-2 py-0.5 rounded text-xs font-medium">
               Your Vote
             </span>
@@ -177,16 +177,16 @@ export function MatchOptionCard({
           className={`w-full mt-4 py-2 rounded font-semibold transition-colors ${
             isSelected
               ? 'bg-lol-gold text-black'
-              : isUserVote && isVotingEnabled
-              ? 'bg-purple-600 text-white'
+              : hasUserVoted && isVotingEnabled
+              ? 'bg-purple-600 hover:bg-purple-500 text-white'
               : 'bg-gray-700 hover:bg-gray-600 text-white'
           }`}
         >
           {isSelected
             ? 'Selected'
             : isVotingEnabled
-            ? isUserVote
-              ? 'Voted'
+            ? hasUserVoted
+              ? 'Voted (Click to Remove)'
               : 'Vote for This'
             : 'Select This Option'}
         </button>

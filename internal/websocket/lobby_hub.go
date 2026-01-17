@@ -530,12 +530,12 @@ func (h *LobbyHub) BroadcastTeamSelected(lobbyID uuid.UUID, optionNumber int, pl
 	state.ClearVotes()
 }
 
-// BroadcastVoteCast broadcasts a vote
-func (h *LobbyHub) BroadcastVoteCast(lobbyID uuid.UUID, userID uuid.UUID, displayName string, optionNumber int, userDisplayNames map[uuid.UUID]string) {
+// BroadcastVoteToggle broadcasts a vote toggle (add or remove)
+func (h *LobbyHub) BroadcastVoteToggle(lobbyID uuid.UUID, userID uuid.UUID, displayName string, optionNumber int, userDisplayNames map[uuid.UUID]string) bool {
 	state := h.GetLobbyState(lobbyID)
 
-	// Record the vote in memory
-	state.CastVote(userID, optionNumber)
+	// Toggle the vote in memory (returns true if added, false if removed)
+	voteAdded := state.ToggleVote(userID, optionNumber)
 
 	// Build voters map with display names
 	votersByOption := state.GetVotersByOption()
@@ -555,10 +555,18 @@ func (h *LobbyHub) BroadcastVoteCast(lobbyID uuid.UUID, userID uuid.UUID, displa
 		UserID:       userID.String(),
 		DisplayName:  displayName,
 		OptionNumber: optionNumber,
+		VoteAdded:    voteAdded,
 		VoteCounts:   state.GetVoteCounts(),
 		VotesCast:    state.GetTotalVotes(),
 		Voters:       voters,
 	}))
+
+	return voteAdded
+}
+
+// BroadcastVoteCast broadcasts a vote (deprecated, use BroadcastVoteToggle)
+func (h *LobbyHub) BroadcastVoteCast(lobbyID uuid.UUID, userID uuid.UUID, displayName string, optionNumber int, userDisplayNames map[uuid.UUID]string) {
+	h.BroadcastVoteToggle(lobbyID, userID, displayName, optionNumber, userDisplayNames)
 }
 
 // BroadcastActionProposed broadcasts a proposed action
