@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { useSelector, useDispatch } from 'react-redux'
 import { RootState } from '@/store'
 import { clearEditingSlot } from '@/store/slices/draftSlice'
-import { Lane, LANE_ORDER, LANE_DISPLAY_NAMES, getChampionLane, getLaneIndex } from '@/data/championLanes'
+import { Lane, LANE_ORDER, LANE_DISPLAY_NAMES, getPrimaryLane, playsLane, getLaneIndex } from '@/data/championLanes'
 
 interface Props {
   onSelect: (championId: string) => void
@@ -62,15 +62,16 @@ export default function ChampionGrid({ onSelect, onLockIn, onHover, onProposeEdi
         if (selectedRoles.length > 0 && !selectedRoles.some(role => champ.tags.includes(role))) {
           return false
         }
-        if (selectedLane && getChampionLane(champ.id) !== selectedLane) {
+        // Filter by lane - show champions that play this lane (any of their lanes)
+        if (selectedLane && !playsLane(champ.lanes, selectedLane)) {
           return false
         }
         return true
       })
       .sort((a, b) => {
-        // Sort by lane order, then alphabetically
-        const laneA = getLaneIndex(getChampionLane(a.id))
-        const laneB = getLaneIndex(getChampionLane(b.id))
+        // Sort by primary lane order, then alphabetically
+        const laneA = getLaneIndex(getPrimaryLane(a.lanes))
+        const laneB = getLaneIndex(getPrimaryLane(b.lanes))
         if (laneA !== laneB) return laneA - laneB
         return a.name.localeCompare(b.name)
       })

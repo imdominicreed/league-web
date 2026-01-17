@@ -24,6 +24,7 @@ type ChampionResponse struct {
 	Title    string   `json:"title"`
 	ImageURL string   `json:"imageUrl"`
 	Tags     []string `json:"tags"`
+	Lanes    []string `json:"lanes"`
 }
 
 type ChampionsResponse struct {
@@ -53,7 +54,9 @@ func (h *ChampionHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 
 	for i, c := range champions {
 		var tags []string
+		var lanes []string
 		json.Unmarshal(c.Tags, &tags)
+		json.Unmarshal(c.Lanes, &lanes)
 
 		resp.Champions[i] = ChampionResponse{
 			ID:       c.ID,
@@ -62,6 +65,7 @@ func (h *ChampionHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 			Title:    c.Title,
 			ImageURL: c.ImageURL,
 			Tags:     tags,
+			Lanes:    lanes,
 		}
 	}
 
@@ -80,7 +84,9 @@ func (h *ChampionHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var tags []string
+	var lanes []string
 	json.Unmarshal(champion.Tags, &tags)
+	json.Unmarshal(champion.Lanes, &lanes)
 
 	resp := ChampionResponse{
 		ID:       champion.ID,
@@ -89,6 +95,7 @@ func (h *ChampionHandler) Get(w http.ResponseWriter, r *http.Request) {
 		Title:    champion.Title,
 		ImageURL: champion.ImageURL,
 		Tags:     tags,
+		Lanes:    lanes,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -10,6 +10,7 @@ export interface Champion {
   title: string
   imageUrl: string
   tags: string[]
+  lanes: string[]  // Primary lanes ordered by playrate: ["mid", "top"]
 }
 
 export interface Room {

@@ -42,6 +42,18 @@ func main() {
 	// Initialize services
 	services := service.NewServices(repos, cfg)
 
+	// Sync champions on startup (in background)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		count, version, err := services.Champion.SyncFromDataDragon(ctx)
+		if err != nil {
+			log.Printf("Warning: failed to sync champions on startup: %v", err)
+		} else {
+			log.Printf("Synced %d champions (version %s) with lane data", count, version)
+		}
+	}()
+
 	// Initialize router
 	router := api.NewRouter(services, hub, lobbyHub, repos, cfg)
 

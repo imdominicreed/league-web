@@ -13,6 +13,7 @@ type Champion struct {
 	Title        string         `json:"title"`                         // e.g., "the Darkin Blade"
 	ImageURL     string         `json:"imageUrl" gorm:"not null"`      // Full URL to champion image
 	Tags         datatypes.JSON `json:"tags" gorm:"type:jsonb"`        // ["Fighter", "Tank"]
+	Lanes        datatypes.JSON `json:"lanes" gorm:"type:jsonb"`       // ["mid", "top"] - lanes with >1% playrate, ordered by playrate
 	LastSyncedAt time.Time      `json:"lastSyncedAt"`
 }
 
