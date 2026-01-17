@@ -170,7 +170,7 @@ export interface VotingStatus {
   votesCast: number
   voteCounts: Record<number, number>
   voters: Record<number, VoterInfo[]>
-  userVote?: number
+  userVotes?: number[]
   winningOption?: number
   canFinalize: boolean
 }
