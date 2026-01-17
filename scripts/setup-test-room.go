@@ -141,7 +141,7 @@ func generateUsername(index int) string {
 func main() {
 	rand.Seed(time.Now().UnixNano())
 
-	fmt.Println("Setting up 10-man lobby...\n")
+	fmt.Println("Setting up 10-man lobby...")
 
 	password := "testpassword123"
 	var users []*User

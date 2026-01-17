@@ -47,11 +47,11 @@ func TestVotingService(t *testing.T) {
 		assert.NotNil(t, status)
 		assert.Equal(t, 1, status.VotesCast)
 		assert.Equal(t, 1, status.VoteCounts[1])
-		require.NotNil(t, status.UserVote)
-		assert.Equal(t, 1, *status.UserVote)
+		require.NotNil(t, status.UserVotes)
+		assert.Contains(t, status.UserVotes, 1)
 	})
 
-	t.Run("CastVote_UpdateExisting", func(t *testing.T) {
+	t.Run("CastVote_ToggleVote", func(t *testing.T) {
 		ts.DB.Truncate(t)
 
 		// Create users and lobby with voting enabled
@@ -75,18 +75,27 @@ func TestVotingService(t *testing.T) {
 			require.NoError(t, err)
 		}
 
-		// Cast first vote
+		// Cast first vote for option 1
 		status, err := ts.Services.Lobby.CastVote(ctx, lobby.ID, users[0].ID, 1)
 		require.NoError(t, err)
 		assert.Equal(t, 1, status.VoteCounts[1])
+		assert.Contains(t, status.UserVotes, 1)
 
-		// Change vote to option 2
+		// Vote for option 2 as well (multi-vote)
 		status, err = ts.Services.Lobby.CastVote(ctx, lobby.ID, users[0].ID, 2)
 		require.NoError(t, err)
-		assert.Equal(t, 0, status.VoteCounts[1])
+		assert.Equal(t, 1, status.VoteCounts[1]) // Option 1 still has the vote
 		assert.Equal(t, 1, status.VoteCounts[2])
-		require.NotNil(t, status.UserVote)
-		assert.Equal(t, 2, *status.UserVote)
+		assert.Contains(t, status.UserVotes, 1)
+		assert.Contains(t, status.UserVotes, 2)
+
+		// Toggle off option 1 by voting for it again
+		status, err = ts.Services.Lobby.CastVote(ctx, lobby.ID, users[0].ID, 1)
+		require.NoError(t, err)
+		assert.Equal(t, 0, status.VoteCounts[1]) // Option 1 vote removed
+		assert.Equal(t, 1, status.VoteCounts[2]) // Option 2 still has vote
+		assert.NotContains(t, status.UserVotes, 1)
+		assert.Contains(t, status.UserVotes, 2)
 	})
 
 	t.Run("CastVote_VotingNotEnabled", func(t *testing.T) {
