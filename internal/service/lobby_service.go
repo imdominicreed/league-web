@@ -381,6 +381,11 @@ func (s *LobbyService) GetPlayers(ctx context.Context, lobbyID uuid.UUID) ([]*do
 	return s.lobbyPlayerRepo.GetByLobbyID(ctx, lobbyID)
 }
 
+// GetLobbyPlayer returns a specific player in a lobby
+func (s *LobbyService) GetLobbyPlayer(ctx context.Context, lobbyID, userID uuid.UUID) (*domain.LobbyPlayer, error) {
+	return s.lobbyPlayerRepo.GetByLobbyIDAndUserID(ctx, lobbyID, userID)
+}
+
 // StartDraft creates a Room from a lobby after team selection
 func (s *LobbyService) StartDraft(ctx context.Context, lobbyID uuid.UUID, userID uuid.UUID) (*domain.Room, error) {
 	// Get lobby with players

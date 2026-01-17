@@ -38,6 +38,41 @@ export default function MatchHistoryCard({ match }: Props) {
     return <span className="text-xs bg-gray-600 text-white px-2 py-0.5 rounded">Spectator</span>
   }
 
+  const renderTeamPicks = (picks: string[], side: 'blue' | 'red') => {
+    const sideColor = side === 'blue' ? 'text-lol-blue' : 'text-red-400'
+    const borderColor = side === 'blue' ? 'border-lol-blue/50' : 'border-red-500/50'
+
+    return (
+      <div>
+        <p className={`text-xs ${sideColor} mb-1 font-semibold`}>{side === 'blue' ? 'Blue Side' : 'Red Side'}</p>
+        <div className="grid grid-cols-5 gap-1">
+          {picks.map((champId, idx) => {
+            const imageUrl = champId ? getChampionImage(champId) : ''
+
+            return (
+              <div key={idx} className="flex flex-col items-center">
+                <span className={`text-[10px] ${sideColor} font-medium mb-0.5`}>
+                  {idx + 1}
+                </span>
+                {imageUrl ? (
+                  <img
+                    src={imageUrl}
+                    alt={champId}
+                    className={`w-10 h-10 rounded object-cover border ${borderColor}`}
+                  />
+                ) : (
+                  <div className={`w-10 h-10 rounded bg-gray-700 border ${borderColor} flex items-center justify-center text-xs text-gray-500`}>
+                    ?
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <Link
       to={`/match/${match.id}`}
@@ -67,49 +102,8 @@ export default function MatchHistoryCard({ match }: Props) {
 
       {/* Team Compositions */}
       <div className="grid grid-cols-2 gap-4">
-        {/* Blue Team */}
-        <div>
-          <p className="text-xs text-lol-blue mb-1 font-semibold">Blue Side</p>
-          <div className="flex gap-1">
-            {match.bluePicks.map((champId, idx) => (
-              <div key={idx} className="relative">
-                {getChampionImage(champId) ? (
-                  <img
-                    src={getChampionImage(champId)}
-                    alt={champId}
-                    className="w-10 h-10 rounded object-cover border border-lol-blue/50"
-                  />
-                ) : (
-                  <div className="w-10 h-10 rounded bg-gray-700 border border-lol-blue/50 flex items-center justify-center text-xs text-gray-500">
-                    ?
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Red Team */}
-        <div>
-          <p className="text-xs text-red-400 mb-1 font-semibold">Red Side</p>
-          <div className="flex gap-1">
-            {match.redPicks.map((champId, idx) => (
-              <div key={idx} className="relative">
-                {getChampionImage(champId) ? (
-                  <img
-                    src={getChampionImage(champId)}
-                    alt={champId}
-                    className="w-10 h-10 rounded object-cover border border-red-500/50"
-                  />
-                ) : (
-                  <div className="w-10 h-10 rounded bg-gray-700 border border-red-500/50 flex items-center justify-center text-xs text-gray-500">
-                    ?
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
+        {renderTeamPicks(match.bluePicks, 'blue')}
+        {renderTeamPicks(match.redPicks, 'red')}
       </div>
 
       {/* Team Players (for team drafts) */}

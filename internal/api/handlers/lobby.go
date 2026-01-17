@@ -18,13 +18,15 @@ type LobbyHandler struct {
 	lobbyService       *service.LobbyService
 	matchmakingService *service.MatchmakingService
 	hub                *websocket.Hub
+	lobbyHub           *websocket.LobbyHub
 }
 
-func NewLobbyHandler(lobbyService *service.LobbyService, matchmakingService *service.MatchmakingService, hub *websocket.Hub) *LobbyHandler {
+func NewLobbyHandler(lobbyService *service.LobbyService, matchmakingService *service.MatchmakingService, hub *websocket.Hub, lobbyHub *websocket.LobbyHub) *LobbyHandler {
 	return &LobbyHandler{
 		lobbyService:       lobbyService,
 		matchmakingService: matchmakingService,
 		hub:                hub,
+		lobbyHub:           lobbyHub,
 	}
 }
 
@@ -99,16 +101,17 @@ type KickPlayerRequest struct {
 }
 
 type MatchOptionResponse struct {
-	OptionNumber   int                  `json:"optionNumber"`
-	AlgorithmType  string               `json:"algorithmType"`
-	BlueTeamAvgMMR int                  `json:"blueTeamAvgMmr"`
-	RedTeamAvgMMR  int                  `json:"redTeamAvgMmr"`
-	MMRDifference  int                  `json:"mmrDifference"`
-	BalanceScore   float64              `json:"balanceScore"`
-	AvgBlueComfort float64              `json:"avgBlueComfort"`
-	AvgRedComfort  float64              `json:"avgRedComfort"`
-	MaxLaneDiff    int                  `json:"maxLaneDiff"`
-	Assignments    []AssignmentResponse `json:"assignments"`
+	OptionNumber     int                  `json:"optionNumber"`
+	AlgorithmType    string               `json:"algorithmType"`
+	BlueTeamAvgMMR   int                  `json:"blueTeamAvgMmr"`
+	RedTeamAvgMMR    int                  `json:"redTeamAvgMmr"`
+	MMRDifference    int                  `json:"mmrDifference"`
+	BalanceScore     float64              `json:"balanceScore"`
+	AvgBlueComfort   float64              `json:"avgBlueComfort"`
+	AvgRedComfort    float64              `json:"avgRedComfort"`
+	MaxLaneDiff      int                  `json:"maxLaneDiff"`
+	UsedMmrThreshold int                  `json:"usedMmrThreshold"`
+	Assignments      []AssignmentResponse `json:"assignments"`
 }
 
 type AssignmentResponse struct {
@@ -270,6 +273,9 @@ func (h *LobbyHandler) Join(w http.ResponseWriter, r *http.Request) {
 		displayName = player.User.DisplayName
 	}
 
+	// Broadcast player joined via WebSocket
+	h.lobbyHub.BroadcastPlayerJoined(lobby.ID, player)
+
 	resp := LobbyPlayerResponse{
 		ID:          player.ID.String(),
 		UserID:      player.UserID.String(),
@@ -300,6 +306,17 @@ func (h *LobbyHandler) Leave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get the player's display name before they leave
+	var displayName string
+	for _, p := range lobby.Players {
+		if p.UserID == userID {
+			if p.User != nil {
+				displayName = p.User.DisplayName
+			}
+			break
+		}
+	}
+
 	if err := h.lobbyService.LeaveLobby(r.Context(), lobby.ID, userID); err != nil {
 		if errors.Is(err, service.ErrNotInLobby) {
 			http.Error(w, "Not in lobby", http.StatusBadRequest)
@@ -309,6 +326,9 @@ func (h *LobbyHandler) Leave(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to leave lobby", http.StatusInternalServerError)
 		return
 	}
+
+	// Broadcast player left via WebSocket
+	h.lobbyHub.BroadcastPlayerLeft(lobby.ID, userID, displayName)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
@@ -348,6 +368,9 @@ func (h *LobbyHandler) SetReady(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to set ready status", http.StatusInternalServerError)
 		return
 	}
+
+	// Broadcast ready status change via WebSocket
+	h.lobbyHub.BroadcastPlayerReadyChanged(lobby.ID, userID, req.Ready)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"ready": req.Ready})
@@ -401,12 +424,88 @@ func (h *LobbyHandler) GenerateTeams(w http.ResponseWriter, r *http.Request) {
 		players[i] = &lobby.Players[i]
 	}
 
+	oldStatus := string(lobby.Status)
 	options, err := h.matchmakingService.GenerateMatchOptions(r.Context(), lobbyID, players, 8)
 	if err != nil {
 		log.Printf("ERROR [lobby.GenerateTeams] failed to generate teams: %v", err)
 		http.Error(w, "Failed to generate teams", http.StatusInternalServerError)
 		return
 	}
+
+	// Broadcast match options generated via WebSocket
+	h.lobbyHub.BroadcastMatchOptionsGenerated(lobbyID, options)
+	h.lobbyHub.BroadcastStatusChanged(lobbyID, oldStatus, string(domain.LobbyStatusMatchmaking))
+
+	// Send full state sync to ensure all clients have voting status
+	h.lobbyHub.BroadcastLobbyUpdate(r.Context(), lobbyID)
+
+	resp := make([]MatchOptionResponse, len(options))
+	for i, opt := range options {
+		resp[i] = toMatchOptionResponse(opt)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (h *LobbyHandler) LoadMoreTeams(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	lobbyID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid lobby ID", http.StatusBadRequest)
+		return
+	}
+
+	lobby, err := h.lobbyService.GetLobby(r.Context(), lobbyID.String())
+	if err != nil {
+		if errors.Is(err, service.ErrLobbyNotFound) {
+			http.Error(w, "Lobby not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("ERROR [lobby.LoadMoreTeams] failed to get lobby: %v", err)
+		http.Error(w, "Failed to get lobby", http.StatusInternalServerError)
+		return
+	}
+
+	// Verify user is a captain
+	var isCaptain bool
+	for _, p := range lobby.Players {
+		if p.UserID == userID && p.IsCaptain {
+			isCaptain = true
+			break
+		}
+	}
+	if !isCaptain {
+		http.Error(w, "Only captain can load more teams", http.StatusForbidden)
+		return
+	}
+
+	// Must be in matchmaking status
+	if lobby.Status != domain.LobbyStatusMatchmaking {
+		http.Error(w, "Can only load more teams during matchmaking", http.StatusBadRequest)
+		return
+	}
+
+	// Convert to pointer slice
+	players := make([]*domain.LobbyPlayer, len(lobby.Players))
+	for i := range lobby.Players {
+		players[i] = &lobby.Players[i]
+	}
+
+	options, err := h.matchmakingService.GenerateMoreMatchOptions(r.Context(), lobbyID, players, 8)
+	if err != nil {
+		log.Printf("ERROR [lobby.LoadMoreTeams] failed to load more teams: %v", err)
+		http.Error(w, "Failed to load more teams", http.StatusInternalServerError)
+		return
+	}
+
+	// Broadcast updated match options via WebSocket
+	h.lobbyHub.BroadcastMatchOptionsGenerated(lobbyID, options)
 
 	resp := make([]MatchOptionResponse, len(options))
 	for i, opt := range options {
@@ -477,6 +576,9 @@ func (h *LobbyHandler) SelectOption(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Broadcast full lobby update to all clients
+	h.lobbyHub.BroadcastLobbyUpdate(r.Context(), lobbyID)
+
 	// Get updated lobby
 	lobby, err := h.lobbyService.GetLobby(r.Context(), lobbyID.String())
 	if err != nil {
@@ -531,6 +633,10 @@ func (h *LobbyHandler) StartDraft(w http.ResponseWriter, r *http.Request) {
 
 	// Create WebSocket room for the draft
 	h.hub.CreateRoom(room.ID, room.ShortCode, room.TimerDurationSeconds*1000)
+
+	// Broadcast draft starting via lobby WebSocket
+	h.lobbyHub.BroadcastDraftStarting(lobbyID, room.ID, room.ShortCode)
+	h.lobbyHub.BroadcastStatusChanged(lobbyID, string(domain.LobbyStatusTeamSelected), string(domain.LobbyStatusDrafting))
 
 	// Build response
 	var blueSideUserID, redSideUserID *string
@@ -589,6 +695,19 @@ func (h *LobbyHandler) TakeCaptain(w http.ResponseWriter, r *http.Request) {
 
 	// Return updated lobby
 	lobby, _ := h.lobbyService.GetLobby(r.Context(), lobbyID.String())
+
+	// Broadcast captain change via WebSocket
+	for _, p := range lobby.Players {
+		if p.UserID == userID && p.Team != nil {
+			displayName := ""
+			if p.User != nil {
+				displayName = p.User.DisplayName
+			}
+			h.lobbyHub.BroadcastCaptainChanged(lobbyID, string(*p.Team), userID, displayName, nil)
+			break
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(toLobbyResponse(lobby))
 }
@@ -633,6 +752,19 @@ func (h *LobbyHandler) PromoteCaptain(w http.ResponseWriter, r *http.Request) {
 	}
 
 	lobby, _ := h.lobbyService.GetLobby(r.Context(), lobbyID.String())
+
+	// Broadcast captain change via WebSocket
+	for _, p := range lobby.Players {
+		if p.UserID == targetUserID && p.Team != nil {
+			displayName := ""
+			if p.User != nil {
+				displayName = p.User.DisplayName
+			}
+			h.lobbyHub.BroadcastCaptainChanged(lobbyID, string(*p.Team), targetUserID, displayName, &userID)
+			break
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(toLobbyResponse(lobby))
 }
@@ -662,6 +794,18 @@ func (h *LobbyHandler) KickPlayer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get the target player's display name BEFORE kicking (they won't be in lobby after)
+	lobbyBefore, _ := h.lobbyService.GetLobby(r.Context(), lobbyID.String())
+	var kickedDisplayName string
+	for _, p := range lobbyBefore.Players {
+		if p.UserID == targetUserID {
+			if p.User != nil {
+				kickedDisplayName = p.User.DisplayName
+			}
+			break
+		}
+	}
+
 	if err := h.lobbyService.KickPlayer(r.Context(), lobbyID, userID, targetUserID); err != nil {
 		if errors.Is(err, service.ErrNotCaptain) {
 			http.Error(w, "Only captain can kick", http.StatusForbidden)
@@ -679,6 +823,16 @@ func (h *LobbyHandler) KickPlayer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to kick player", http.StatusInternalServerError)
 		return
 	}
+
+	// Broadcast player kicked via WebSocket
+	var kickerDisplayName string
+	for _, p := range lobbyBefore.Players {
+		if p.UserID == userID && p.User != nil {
+			kickerDisplayName = p.User.DisplayName
+			break
+		}
+	}
+	h.lobbyHub.BroadcastPlayerKicked(lobbyID, targetUserID, kickedDisplayName, kickerDisplayName)
 
 	lobby, _ := h.lobbyService.GetLobby(r.Context(), lobbyID.String())
 	w.Header().Set("Content-Type", "application/json")
@@ -756,6 +910,12 @@ func (h *LobbyHandler) ProposeSwap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Store in lobby state and broadcast to all clients
+	inMemoryAction := domainToInMemoryAction(action)
+	state := h.lobbyHub.GetLobbyState(lobbyID)
+	state.SetPendingAction(inMemoryAction)
+	h.lobbyHub.BroadcastActionProposed(lobbyID, inMemoryAction)
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(toPendingActionResponse(action))
 }
@@ -796,6 +956,13 @@ func (h *LobbyHandler) ProposeMatchmake(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Store in lobby state and broadcast to all clients
+	inMemoryAction := domainToInMemoryAction(action)
+	state := h.lobbyHub.GetLobbyState(lobbyID)
+	state.SetPendingAction(inMemoryAction)
+	log.Printf("[lobby.ProposeMatchmake] Broadcasting action_proposed to %d clients for lobby %s", state.ClientCount(), lobbyID)
+	h.lobbyHub.BroadcastActionProposed(lobbyID, inMemoryAction)
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(toPendingActionResponse(action))
 }
@@ -831,6 +998,12 @@ func (h *LobbyHandler) ProposeStartDraft(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "Failed to propose start draft", http.StatusInternalServerError)
 		return
 	}
+
+	// Store in lobby state and broadcast to all clients
+	inMemoryAction := domainToInMemoryAction(action)
+	state := h.lobbyHub.GetLobbyState(lobbyID)
+	state.SetPendingAction(inMemoryAction)
+	h.lobbyHub.BroadcastActionProposed(lobbyID, inMemoryAction)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(toPendingActionResponse(action))
@@ -880,6 +1053,13 @@ func (h *LobbyHandler) ProposeSelectOption(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Store in lobby state and broadcast to all clients
+	inMemoryAction := domainToInMemoryAction(action)
+	state := h.lobbyHub.GetLobbyState(lobbyID)
+	state.SetPendingAction(inMemoryAction)
+	log.Printf("[lobby.ProposeSelectOption] Broadcasting action_proposed to %d clients for lobby %s, action type: %s", state.ClientCount(), lobbyID, action.ActionType)
+	h.lobbyHub.BroadcastActionProposed(lobbyID, inMemoryAction)
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(toPendingActionResponse(action))
 }
@@ -903,6 +1083,17 @@ func (h *LobbyHandler) ApprovePendingAction(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Get the in-memory state and pending action before approval
+	state := h.lobbyHub.GetLobbyState(lobbyID)
+	pendingAction := state.GetPendingAction()
+
+	// Determine which side is approving based on user's captain status
+	captain, _ := h.lobbyService.GetLobbyPlayer(r.Context(), lobbyID, userID)
+	var approvingSide string
+	if captain != nil && captain.Team != nil {
+		approvingSide = string(*captain.Team)
+	}
+
 	if err := h.lobbyService.ApprovePendingAction(r.Context(), lobbyID, userID, actionID); err != nil {
 		if errors.Is(err, service.ErrNotCaptain) {
 			http.Error(w, "Only captain can approve", http.StatusForbidden)
@@ -923,6 +1114,19 @@ func (h *LobbyHandler) ApprovePendingAction(w http.ResponseWriter, r *http.Reque
 		log.Printf("ERROR [lobby.ApprovePendingAction] failed: %v", err)
 		http.Error(w, "Failed to approve action", http.StatusInternalServerError)
 		return
+	}
+
+	// Update in-memory state and broadcast
+	if pendingAction != nil && approvingSide != "" {
+		fullyApproved := state.ApprovePendingAction(approvingSide)
+		h.lobbyHub.BroadcastActionApproved(lobbyID, actionID, approvingSide, pendingAction.ApprovedByBlue || approvingSide == "blue", pendingAction.ApprovedByRed || approvingSide == "red")
+
+		if fullyApproved {
+			// Action was executed by the service, broadcast execution and clear state
+			h.lobbyHub.BroadcastActionExecuted(lobbyID, pendingAction.ActionType, nil)
+			// Broadcast full lobby update to sync all clients with the new state
+			h.lobbyHub.BroadcastLobbyUpdate(r.Context(), lobbyID)
+		}
 	}
 
 	lobby, _ := h.lobbyService.GetLobby(r.Context(), lobbyID.String())
@@ -962,6 +1166,9 @@ func (h *LobbyHandler) CancelPendingAction(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "Failed to cancel action", http.StatusInternalServerError)
 		return
 	}
+
+	// Clear from lobby state and broadcast cancellation
+	h.lobbyHub.BroadcastActionCancelled(lobbyID, actionID, userID.String())
 
 	lobby, _ := h.lobbyService.GetLobby(r.Context(), lobbyID.String())
 	w.Header().Set("Content-Type", "application/json")
@@ -1056,6 +1263,21 @@ func (h *LobbyHandler) Vote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get lobby first to get player display names
+	lobby, _ := h.lobbyService.GetLobby(r.Context(), lobbyID.String())
+	var displayName string
+	userDisplayNames := make(map[uuid.UUID]string)
+	if lobby != nil {
+		for _, p := range lobby.Players {
+			if p.User != nil {
+				userDisplayNames[p.UserID] = p.User.DisplayName
+				if p.UserID == userID {
+					displayName = p.User.DisplayName
+				}
+			}
+		}
+	}
+
 	status, err := h.lobbyService.CastVote(r.Context(), lobbyID, userID, req.OptionNumber)
 	if err != nil {
 		if errors.Is(err, service.ErrVotingNotEnabled) {
@@ -1078,6 +1300,9 @@ func (h *LobbyHandler) Vote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to cast vote", http.StatusInternalServerError)
 		return
 	}
+
+	// Broadcast vote via WebSocket
+	h.lobbyHub.BroadcastVoteCast(lobbyID, userID, displayName, req.OptionNumber, userDisplayNames)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(toVotingStatusResponse(status))
@@ -1149,6 +1374,9 @@ func (h *LobbyHandler) StartVoting(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Broadcast voting started to all clients
+	h.lobbyHub.BroadcastLobbyUpdate(r.Context(), lobbyID)
+
 	// Return updated lobby
 	lobby, _ := h.lobbyService.GetLobby(r.Context(), lobbyID.String())
 	w.Header().Set("Content-Type", "application/json")
@@ -1200,6 +1428,9 @@ func (h *LobbyHandler) EndVoting(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	// Broadcast full lobby update to all clients (includes team selection result)
+	h.lobbyHub.BroadcastLobbyUpdate(r.Context(), lobbyID)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(toLobbyResponse(lobby))
@@ -1328,6 +1559,24 @@ func toPendingActionResponse(action *domain.PendingAction) PendingActionResponse
 	}
 }
 
+// domainToInMemoryAction converts a domain.PendingAction to websocket.InMemoryPendingAction
+func domainToInMemoryAction(action *domain.PendingAction) *websocket.InMemoryPendingAction {
+	return &websocket.InMemoryPendingAction{
+		ID:             action.ID,
+		ActionType:     string(action.ActionType),
+		Status:         string(action.Status),
+		ProposedByUser: action.ProposedByUser,
+		ProposedBySide: string(action.ProposedBySide),
+		Player1ID:      action.Player1ID,
+		Player2ID:      action.Player2ID,
+		MatchOptionNum: action.MatchOptionNum,
+		ApprovedByBlue: action.ApprovedByBlue,
+		ApprovedByRed:  action.ApprovedByRed,
+		ExpiresAt:      action.ExpiresAt,
+		CreatedAt:      action.CreatedAt,
+	}
+}
+
 func toMatchOptionResponse(opt *domain.MatchOption) MatchOptionResponse {
 	assignments := make([]AssignmentResponse, len(opt.Assignments))
 	for i, a := range opt.Assignments {
@@ -1346,15 +1595,16 @@ func toMatchOptionResponse(opt *domain.MatchOption) MatchOptionResponse {
 	}
 
 	return MatchOptionResponse{
-		OptionNumber:   opt.OptionNumber,
-		AlgorithmType:  string(opt.AlgorithmType),
-		BlueTeamAvgMMR: opt.BlueTeamAvgMMR,
-		RedTeamAvgMMR:  opt.RedTeamAvgMMR,
-		MMRDifference:  opt.MMRDifference,
-		BalanceScore:   opt.BalanceScore,
-		AvgBlueComfort: opt.AvgBlueComfort,
-		AvgRedComfort:  opt.AvgRedComfort,
-		MaxLaneDiff:    opt.MaxLaneDiff,
-		Assignments:    assignments,
+		OptionNumber:     opt.OptionNumber,
+		AlgorithmType:    string(opt.AlgorithmType),
+		BlueTeamAvgMMR:   opt.BlueTeamAvgMMR,
+		RedTeamAvgMMR:    opt.RedTeamAvgMMR,
+		MMRDifference:    opt.MMRDifference,
+		BalanceScore:     opt.BalanceScore,
+		AvgBlueComfort:   opt.AvgBlueComfort,
+		AvgRedComfort:    opt.AvgRedComfort,
+		MaxLaneDiff:      opt.MaxLaneDiff,
+		UsedMmrThreshold: opt.UsedMmrThreshold,
+		Assignments:      assignments,
 	}
 }

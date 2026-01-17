@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"math"
+	"math/rand"
 	"sort"
 	"strings"
 	"time"
@@ -10,6 +11,13 @@ import (
 	"github.com/dom/league-draft-website/internal/domain"
 	"github.com/dom/league-draft-website/internal/repository"
 	"github.com/google/uuid"
+)
+
+// MMR threshold constants for comfort-first matchmaking
+const (
+	InitialMmrThreshold   = 100
+	MmrThresholdIncrement = 100
+	MaxMmrThreshold       = 500
 )
 
 type MatchmakingService struct {
@@ -58,124 +66,7 @@ type GeneratedOption struct {
 	TotalComfortPenalty int
 	MaxLaneDiff         int
 	AlgorithmType       domain.AlgorithmType
-}
-
-// ScoringStrategy defines how to score a team assignment
-type ScoringStrategy interface {
-	Score(opt *GeneratedOption) float64
-	AlgorithmType() domain.AlgorithmType
-}
-
-// MMRBalancedStrategy prioritizes minimizing team MMR difference
-type MMRBalancedStrategy struct{}
-
-func (s *MMRBalancedStrategy) AlgorithmType() domain.AlgorithmType {
-	return domain.AlgorithmMMRBalanced
-}
-
-func (s *MMRBalancedStrategy) Score(opt *GeneratedOption) float64 {
-	// Heavy weight on MMR difference, light on comfort
-	// Calculate exponential comfort penalty from assignments
-	var comfortPen float64
-	for _, a := range opt.Assignments {
-		comfortPen += comfortPenalty(a.ComfortRating)
-	}
-
-	score := 100.0
-	score -= float64(opt.MMRDifference) / 50.0 // -2 points per 100 MMR diff
-	score -= comfortPen * 0.15                 // Light comfort penalty (adjusted for exponential scale)
-	return max(0, score)
-}
-
-// RoleComfortStrategy prioritizes players getting high-comfort roles
-type RoleComfortStrategy struct{}
-
-func (s *RoleComfortStrategy) AlgorithmType() domain.AlgorithmType {
-	return domain.AlgorithmRoleComfort
-}
-
-func (s *RoleComfortStrategy) Score(opt *GeneratedOption) float64 {
-	// Heavy weight on comfort, MMR barely matters
-	// Calculate exponential comfort penalty from assignments
-	var comfortPen float64
-	for _, a := range opt.Assignments {
-		comfortPen += comfortPenalty(a.ComfortRating)
-	}
-
-	score := 100.0
-	score -= comfortPen * 1.5                  // Heavy comfort penalty (adjusted for exponential scale)
-	score -= float64(opt.MMRDifference) / 500.0 // Light MMR penalty
-	return max(0, score)
-}
-
-// HybridStrategy uses the current balanced approach
-type HybridStrategy struct{}
-
-func (s *HybridStrategy) AlgorithmType() domain.AlgorithmType {
-	return domain.AlgorithmHybrid
-}
-
-func (s *HybridStrategy) Score(opt *GeneratedOption) float64 {
-	// Balanced approach between MMR and comfort
-	// Calculate exponential comfort penalty from assignments
-	var comfortPen float64
-	for _, a := range opt.Assignments {
-		comfortPen += comfortPenalty(a.ComfortRating)
-	}
-
-	score := 100.0
-	score -= float64(opt.MMRDifference) / 100.0 // -1 point per 100 MMR difference
-	score -= comfortPen * 0.5                   // Balanced comfort penalty (adjusted for exponential scale)
-	return max(0, score)
-}
-
-// LaneBalancedStrategy minimizes the worst lane matchup
-type LaneBalancedStrategy struct{}
-
-func (s *LaneBalancedStrategy) AlgorithmType() domain.AlgorithmType {
-	return domain.AlgorithmLaneBalanced
-}
-
-func (s *LaneBalancedStrategy) Score(opt *GeneratedOption) float64 {
-	// Calculate per-lane differentials
-	laneDiffs := make(map[domain.Role]int)
-	for _, role := range domain.AllRoles {
-		var blueMMR, redMMR int
-		for _, a := range opt.Assignments {
-			if a.Role == role {
-				if a.Team == domain.SideBlue {
-					blueMMR = a.RoleMMR
-				} else {
-					redMMR = a.RoleMMR
-				}
-			}
-		}
-		laneDiffs[role] = abs(blueMMR - redMMR)
-	}
-
-	// Find max lane diff and sum
-	maxLaneDiff := 0
-	sumLaneDiff := 0
-	for _, diff := range laneDiffs {
-		sumLaneDiff += diff
-		if diff > maxLaneDiff {
-			maxLaneDiff = diff
-		}
-	}
-	opt.MaxLaneDiff = maxLaneDiff
-
-	// Calculate exponential comfort penalty from assignments
-	var comfortPen float64
-	for _, a := range opt.Assignments {
-		comfortPen += comfortPenalty(a.ComfortRating)
-	}
-
-	// Primarily punishes the worst lane matchup
-	score := 100.0
-	score -= float64(maxLaneDiff) / 100.0 // -1 point per 100 MMR max lane diff
-	score -= float64(sumLaneDiff) / 500.0 // Light penalty for total lane imbalance
-	score -= comfortPen * 0.1             // Minimal comfort consideration (adjusted for exponential scale)
-	return max(0, score)
+	UsedMmrThreshold    int
 }
 
 // GenerateMatchOptions generates balanced team options for a lobby
@@ -235,19 +126,20 @@ func (s *MatchmakingService) GenerateMatchOptions(ctx context.Context, lobbyID u
 	savedOptions := make([]*domain.MatchOption, len(options))
 	for i, opt := range options {
 		matchOption := &domain.MatchOption{
-			ID:             uuid.New(),
-			LobbyID:        lobbyID,
-			OptionNumber:   i + 1,
-			AlgorithmType:  opt.AlgorithmType,
-			BlueTeamAvgMMR: opt.BlueTeamMMR / 5,
-			RedTeamAvgMMR:  opt.RedTeamMMR / 5,
-			MMRDifference:  opt.MMRDifference,
-			BalanceScore:   opt.BalanceScore,
-			AvgBlueComfort: opt.AvgBlueComfort,
-			AvgRedComfort:  opt.AvgRedComfort,
-			MaxLaneDiff:    opt.MaxLaneDiff,
-			CreatedAt:      time.Now(),
-			Assignments:    make([]domain.MatchOptionAssignment, len(opt.Assignments)),
+			ID:               uuid.New(),
+			LobbyID:          lobbyID,
+			OptionNumber:     i + 1,
+			AlgorithmType:    opt.AlgorithmType,
+			BlueTeamAvgMMR:   opt.BlueTeamMMR / 5,
+			RedTeamAvgMMR:    opt.RedTeamMMR / 5,
+			MMRDifference:    opt.MMRDifference,
+			BalanceScore:     opt.BalanceScore,
+			AvgBlueComfort:   opt.AvgBlueComfort,
+			AvgRedComfort:    opt.AvgRedComfort,
+			MaxLaneDiff:      opt.MaxLaneDiff,
+			UsedMmrThreshold: opt.UsedMmrThreshold,
+			CreatedAt:        time.Now(),
+			Assignments:      make([]domain.MatchOptionAssignment, len(opt.Assignments)),
 		}
 
 		for j, a := range opt.Assignments {
@@ -281,58 +173,230 @@ func (s *MatchmakingService) GenerateMatchOptions(ctx context.Context, lobbyID u
 	return s.matchOptionRepo.GetByLobbyID(ctx, lobbyID)
 }
 
-// generateBestOptions generates the best team compositions using multiple algorithms
+// GenerateMoreMatchOptions generates additional team options and appends them to existing ones
+func (s *MatchmakingService) GenerateMoreMatchOptions(ctx context.Context, lobbyID uuid.UUID, players []*domain.LobbyPlayer, count int) ([]*domain.MatchOption, error) {
+	if len(players) != 10 {
+		return nil, ErrNotEnoughPlayers
+	}
+
+	// Get existing options to find max option number and existing compositions
+	existingOptions, err := s.matchOptionRepo.GetByLobbyID(ctx, lobbyID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Find the next option number and max threshold used
+	maxOptionNum := 0
+	maxThresholdUsed := InitialMmrThreshold
+	existingHashes := make(map[string]bool)
+	for _, opt := range existingOptions {
+		if opt.OptionNumber > maxOptionNum {
+			maxOptionNum = opt.OptionNumber
+		}
+		if opt.UsedMmrThreshold > maxThresholdUsed {
+			maxThresholdUsed = opt.UsedMmrThreshold
+		}
+		// Build hash of existing compositions to avoid duplicates
+		hash := s.buildOptionHash(opt)
+		existingHashes[hash] = true
+	}
+
+	// Increase threshold by 100 for loading more teams
+	newThreshold := maxThresholdUsed + MmrThresholdIncrement
+
+	// Load role profiles for all players
+	userIDs := make([]uuid.UUID, len(players))
+	displayNames := make(map[uuid.UUID]string)
+	for i, p := range players {
+		userIDs[i] = p.UserID
+		if p.User != nil {
+			displayNames[p.UserID] = p.User.DisplayName
+		}
+	}
+
+	profilesByUser, err := s.profileRepo.GetByUserIDs(ctx, userIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build player data
+	playerData := make([]*PlayerData, len(players))
+	for i, p := range players {
+		pd := &PlayerData{
+			UserID:       p.UserID,
+			DisplayName:  displayNames[p.UserID],
+			RoleProfiles: make(map[domain.Role]*domain.UserRoleProfile),
+		}
+
+		profiles := profilesByUser[p.UserID]
+		for _, profile := range profiles {
+			pd.RoleProfiles[profile.Role] = profile
+		}
+
+		// Fill missing roles with defaults
+		for _, role := range domain.AllRoles {
+			if _, ok := pd.RoleProfiles[role]; !ok {
+				pd.RoleProfiles[role] = domain.NewDefaultUserRoleProfile(p.UserID, role)
+			}
+		}
+
+		playerData[i] = pd
+	}
+
+	// Generate ALL possible options with the increased threshold
+	// There are 252 possible team splits, so we request all of them
+	options := s.generateBestOptionsWithMinThreshold(playerData, 252, newThreshold)
+
+	// Filter out duplicates - use a fresh set to track within this batch too
+	seenInBatch := make(map[string]bool)
+	var newOptions []*GeneratedOption
+	for _, opt := range options {
+		hash := computeAssignmentHash(opt.Assignments)
+		// Skip if already exists in DB or already added in this batch
+		if existingHashes[hash] || seenInBatch[hash] {
+			continue
+		}
+		seenInBatch[hash] = true
+		newOptions = append(newOptions, opt)
+		if len(newOptions) >= count {
+			break
+		}
+	}
+
+	// Save new options with incremented option numbers
+	for i, opt := range newOptions {
+		matchOption := &domain.MatchOption{
+			ID:               uuid.New(),
+			LobbyID:          lobbyID,
+			OptionNumber:     maxOptionNum + i + 1,
+			AlgorithmType:    opt.AlgorithmType,
+			BlueTeamAvgMMR:   opt.BlueTeamMMR / 5,
+			RedTeamAvgMMR:    opt.RedTeamMMR / 5,
+			MMRDifference:    opt.MMRDifference,
+			BalanceScore:     opt.BalanceScore,
+			AvgBlueComfort:   opt.AvgBlueComfort,
+			AvgRedComfort:    opt.AvgRedComfort,
+			MaxLaneDiff:      opt.MaxLaneDiff,
+			UsedMmrThreshold: opt.UsedMmrThreshold,
+			CreatedAt:        time.Now(),
+			Assignments:      make([]domain.MatchOptionAssignment, len(opt.Assignments)),
+		}
+
+		for j, a := range opt.Assignments {
+			matchOption.Assignments[j] = domain.MatchOptionAssignment{
+				ID:            uuid.New(),
+				MatchOptionID: matchOption.ID,
+				UserID:        a.UserID,
+				Team:          a.Team,
+				AssignedRole:  a.Role,
+				RoleMMR:       a.RoleMMR,
+				ComfortRating: a.ComfortRating,
+			}
+		}
+
+		if err := s.matchOptionRepo.Create(ctx, matchOption); err != nil {
+			return nil, err
+		}
+	}
+
+	return s.matchOptionRepo.GetByLobbyID(ctx, lobbyID)
+}
+
+// buildOptionHash creates a hash from a domain.MatchOption for deduplication
+func (s *MatchmakingService) buildOptionHash(opt *domain.MatchOption) string {
+	assignments := make([]TeamAssignment, len(opt.Assignments))
+	for i, a := range opt.Assignments {
+		assignments[i] = TeamAssignment{
+			UserID: a.UserID,
+			Team:   a.Team,
+			Role:   a.AssignedRole,
+		}
+	}
+	return computeAssignmentHash(assignments)
+}
+
+// generateBestOptions generates the best team compositions using comfort-first algorithm
+// with progressive MMR threshold expansion and randomization for variety
 func (s *MatchmakingService) generateBestOptions(players []*PlayerData, count int) []*GeneratedOption {
-	// Calculate MMR range to detect wide skill variance
-	minMMR, maxMMR := s.calculateMMRRange(players)
-	mmrRange := maxMMR - minMMR
+	return s.generateBestOptionsWithMinThreshold(players, count, InitialMmrThreshold)
+}
+
+// generateBestOptionsWithMinThreshold generates options starting from a minimum threshold
+func (s *MatchmakingService) generateBestOptionsWithMinThreshold(players []*PlayerData, count int, minThreshold int) []*GeneratedOption {
+	// Seed random for variety on each call
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	// Generate team splits once (C(10,5) = 252 combinations)
 	teamSplits := generateTeamSplits(len(players))
 
-	// Pre-compute all base options (without algorithm-specific scoring)
+	// Pre-compute all base options with comfort-optimized role assignments
 	baseOptions := s.computeAllBaseOptions(players, teamSplits)
 
-	// Define all scoring strategies
-	strategies := []ScoringStrategy{
-		&MMRBalancedStrategy{},
-		&RoleComfortStrategy{},
-		&HybridStrategy{},
-		&LaneBalancedStrategy{},
+	// Score all options by comfort (lower penalty = better)
+	for _, opt := range baseOptions {
+		opt.BalanceScore = s.scoreByComfort(opt)
+		opt.AlgorithmType = domain.AlgorithmComfortFirst
 	}
 
-	// Collect best 2 options from each algorithm
-	var allOptions []*GeneratedOption
-	optionsPerAlgorithm := 2
-
-	for _, strategy := range strategies {
-		bestFromStrategy := s.getBestOptionsForStrategy(baseOptions, strategy, optionsPerAlgorithm)
-		allOptions = append(allOptions, bestFromStrategy...)
-	}
-
-	// Deduplicate identical team compositions (keep first occurrence)
-	allOptions = deduplicateOptions(allOptions)
-
-	// Choose primary sorting strategy based on skill variance
-	// When MMR range is wide (>1000), lane matchups matter more
-	var primaryStrategy ScoringStrategy
-	if mmrRange > 1000 {
-		primaryStrategy = &LaneBalancedStrategy{}
-	} else {
-		primaryStrategy = &HybridStrategy{}
-	}
-
-	// Sort by primary strategy for final ranking
-	sort.Slice(allOptions, func(i, j int) bool {
-		return primaryStrategy.Score(allOptions[i]) > primaryStrategy.Score(allOptions[j])
+	// Shuffle first to randomize tie-breaking among options with identical scores
+	rng.Shuffle(len(baseOptions), func(i, j int) {
+		baseOptions[i], baseOptions[j] = baseOptions[j], baseOptions[i]
 	})
 
-	// Return top N options
-	if len(allOptions) > count {
-		allOptions = allOptions[:count]
+	// Sort by comfort score (descending - higher score is better)
+	// Use stable sort to preserve random order among equal scores
+	sort.SliceStable(baseOptions, func(i, j int) bool {
+		return baseOptions[i].BalanceScore > baseOptions[j].BalanceScore
+	})
+
+	// Try progressive MMR thresholds starting from minThreshold
+	for threshold := minThreshold; threshold <= MaxMmrThreshold; threshold += MmrThresholdIncrement {
+		var filtered []*GeneratedOption
+		for _, opt := range baseOptions {
+			if opt.MMRDifference <= threshold {
+				optCopy := *opt
+				optCopy.UsedMmrThreshold = threshold
+				filtered = append(filtered, &optCopy)
+			}
+		}
+
+		// Deduplicate
+		filtered = deduplicateOptions(filtered)
+
+		if len(filtered) >= 1 {
+			// Return top N options
+			if len(filtered) > count {
+				filtered = filtered[:count]
+			}
+			return filtered
+		}
 	}
 
-	return allOptions
+	// No threshold worked - return best available (best effort)
+	deduped := deduplicateOptions(baseOptions)
+	for _, opt := range deduped {
+		opt.UsedMmrThreshold = -1 // Indicates best effort, no threshold met
+	}
+	if len(deduped) > count {
+		deduped = deduped[:count]
+	}
+	return deduped
+}
+
+// scoreByComfort scores an option based purely on comfort, with tiny MMR tiebreaker
+func (s *MatchmakingService) scoreByComfort(opt *GeneratedOption) float64 {
+	var totalComfortPenalty float64
+	for _, a := range opt.Assignments {
+		totalComfortPenalty += comfortPenalty(a.ComfortRating)
+	}
+
+	// Higher score is better
+	// Start at 100, subtract comfort penalty
+	// Add tiny MMR tiebreaker (smaller diff = slightly higher score)
+	score := 100.0
+	score -= totalComfortPenalty * 1.0               // Primary: comfort
+	score -= float64(opt.MMRDifference) / 10000.0    // Tiny tiebreaker for identical comfort
+	return max(0, score)
 }
 
 // computeAllBaseOptions computes all possible team compositions with their base stats
@@ -362,38 +426,6 @@ func (s *MatchmakingService) computeAllBaseOptions(players []*PlayerData, teamSp
 	}
 
 	return allOptions
-}
-
-// getBestOptionsForStrategy scores all options with a strategy and returns top N
-func (s *MatchmakingService) getBestOptionsForStrategy(options []*GeneratedOption, strategy ScoringStrategy, n int) []*GeneratedOption {
-	// Create scored copies
-	type scoredOption struct {
-		option *GeneratedOption
-		score  float64
-	}
-
-	scored := make([]scoredOption, len(options))
-	for i, opt := range options {
-		// Create a copy to avoid modifying the original
-		optCopy := *opt
-		score := strategy.Score(&optCopy)
-		optCopy.BalanceScore = score
-		optCopy.AlgorithmType = strategy.AlgorithmType()
-		scored[i] = scoredOption{option: &optCopy, score: score}
-	}
-
-	// Sort by score descending
-	sort.Slice(scored, func(i, j int) bool {
-		return scored[i].score > scored[j].score
-	})
-
-	// Take top N
-	result := make([]*GeneratedOption, 0, n)
-	for i := 0; i < n && i < len(scored); i++ {
-		result = append(result, scored[i].option)
-	}
-
-	return result
 }
 
 // deduplicateOptions removes duplicate team compositions, keeping the first occurrence
@@ -483,12 +515,11 @@ func (s *MatchmakingService) findBestRoleAssignment(blueTeam, redTeam []*PlayerD
 			mmrDiff := abs(blueMMR - redMMR)
 			totalPenalty := blueComfortPen + redComfortPen
 
-			// Calculate balance score using hybrid formula with exponential comfort
-			// - Lose points for MMR difference
-			// - Lose points for comfort penalties (exponential scale)
+			// Comfort-first scoring: prioritize minimizing comfort penalty
+			// Use tiny MMR tiebreaker for identical comfort scores
 			score := 100.0
-			score -= float64(mmrDiff) / 100.0 // -1 point per 100 MMR difference
-			score -= totalPenalty * 0.5       // Adjusted for exponential scale
+			score -= totalPenalty * 1.0              // Primary: comfort penalty
+			score -= float64(mmrDiff) / 10000.0      // Tiny tiebreaker for identical comfort
 
 			if score > bestScore {
 				bestScore = score
@@ -605,21 +636,4 @@ func abs(x int) int {
 // comfort 5 → 0, comfort 4 → 1, comfort 3 → 3, comfort 2 → 7, comfort 1 → 15
 func comfortPenalty(comfort int) float64 {
 	return math.Pow(2, float64(5-comfort)) - 1
-}
-
-// calculateMMRRange finds the min and max MMR across all players and roles
-func (s *MatchmakingService) calculateMMRRange(players []*PlayerData) (minMMR, maxMMR int) {
-	minMMR = math.MaxInt
-	maxMMR = 0
-	for _, p := range players {
-		for _, profile := range p.RoleProfiles {
-			if profile.MMR < minMMR {
-				minMMR = profile.MMR
-			}
-			if profile.MMR > maxMMR {
-				maxMMR = profile.MMR
-			}
-		}
-	}
-	return minMMR, maxMMR
 }

@@ -14,6 +14,7 @@ const (
 	AlgorithmRoleComfort  AlgorithmType = "role_comfort"
 	AlgorithmHybrid       AlgorithmType = "hybrid"
 	AlgorithmLaneBalanced AlgorithmType = "lane_balanced"
+	AlgorithmComfortFirst AlgorithmType = "comfort_first"
 )
 
 // AlgorithmLabels maps algorithm types to human-readable labels
@@ -22,22 +23,24 @@ var AlgorithmLabels = map[AlgorithmType]string{
 	AlgorithmRoleComfort:  "Best Role Fit",
 	AlgorithmHybrid:       "Balanced Overall",
 	AlgorithmLaneBalanced: "Fair Lanes",
+	AlgorithmComfortFirst: "Best Comfort",
 }
 
 // MatchOption represents a possible team composition from matchmaking
 type MatchOption struct {
-	ID             uuid.UUID     `json:"id" gorm:"type:uuid;primary_key;default:gen_random_uuid()"`
-	LobbyID        uuid.UUID     `json:"lobbyId" gorm:"type:uuid;not null;index"`
-	OptionNumber   int           `json:"optionNumber" gorm:"not null"`
-	AlgorithmType  AlgorithmType `json:"algorithmType" gorm:"type:varchar(20);not null;default:'hybrid'"`
-	BlueTeamAvgMMR int           `json:"blueTeamAvgMmr" gorm:"not null"`
-	RedTeamAvgMMR  int           `json:"redTeamAvgMmr" gorm:"not null"`
-	MMRDifference  int           `json:"mmrDifference" gorm:"not null"`
-	BalanceScore   float64       `json:"balanceScore" gorm:"type:decimal(5,2);not null"`
-	AvgBlueComfort float64       `json:"avgBlueComfort" gorm:"type:decimal(3,2)"`
-	AvgRedComfort  float64       `json:"avgRedComfort" gorm:"type:decimal(3,2)"`
-	MaxLaneDiff    int           `json:"maxLaneDiff" gorm:"default:0"`
-	CreatedAt      time.Time     `json:"createdAt"`
+	ID               uuid.UUID     `json:"id" gorm:"type:uuid;primary_key;default:gen_random_uuid()"`
+	LobbyID          uuid.UUID     `json:"lobbyId" gorm:"type:uuid;not null;index"`
+	OptionNumber     int           `json:"optionNumber" gorm:"not null"`
+	AlgorithmType    AlgorithmType `json:"algorithmType" gorm:"type:varchar(20);not null;default:'comfort_first'"`
+	BlueTeamAvgMMR   int           `json:"blueTeamAvgMmr" gorm:"not null"`
+	RedTeamAvgMMR    int           `json:"redTeamAvgMmr" gorm:"not null"`
+	MMRDifference    int           `json:"mmrDifference" gorm:"not null"`
+	BalanceScore     float64       `json:"balanceScore" gorm:"type:decimal(5,2);not null"`
+	AvgBlueComfort   float64       `json:"avgBlueComfort" gorm:"type:decimal(3,2)"`
+	AvgRedComfort    float64       `json:"avgRedComfort" gorm:"type:decimal(3,2)"`
+	MaxLaneDiff      int           `json:"maxLaneDiff" gorm:"default:0"`
+	UsedMmrThreshold int           `json:"usedMmrThreshold" gorm:"default:0"`
+	CreatedAt        time.Time     `json:"createdAt"`
 
 	// Relations
 	Assignments []MatchOptionAssignment `json:"assignments,omitempty" gorm:"foreignKey:MatchOptionID"`

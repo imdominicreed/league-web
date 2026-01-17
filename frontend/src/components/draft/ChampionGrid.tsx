@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import { useSelector, useDispatch } from 'react-redux'
 import { RootState } from '@/store'
 import { clearEditingSlot } from '@/store/slices/draftSlice'
+import { Lane, LANE_ORDER, LANE_DISPLAY_NAMES, getChampionLane, getLaneIndex } from '@/data/championLanes'
 
 interface Props {
   onSelect: (championId: string) => void
@@ -21,6 +22,7 @@ export default function ChampionGrid({ onSelect, onLockIn, onHover, onProposeEdi
   const [selectedChampion, setSelectedChampion] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedRoles, setSelectedRoles] = useState<string[]>([])
+  const [selectedLane, setSelectedLane] = useState<Lane | null>(null)
 
   // Edit mode state
   const isEditMode = draft.isPaused && draft.editingSlot !== null
@@ -52,16 +54,27 @@ export default function ChampionGrid({ onSelect, onLockIn, onHover, onProposeEdi
   }, [draft.blueBans, draft.redBans, draft.bluePicks, draft.redPicks, draft.fearlessBans, editingSlotChampion])
 
   const filteredChampions = useMemo(() => {
-    return championsList.filter(champ => {
-      if (searchTerm && !champ.name.toLowerCase().includes(searchTerm.toLowerCase())) {
-        return false
-      }
-      if (selectedRoles.length > 0 && !selectedRoles.some(role => champ.tags.includes(role))) {
-        return false
-      }
-      return true
-    })
-  }, [championsList, searchTerm, selectedRoles])
+    return championsList
+      .filter(champ => {
+        if (searchTerm && !champ.name.toLowerCase().includes(searchTerm.toLowerCase())) {
+          return false
+        }
+        if (selectedRoles.length > 0 && !selectedRoles.some(role => champ.tags.includes(role))) {
+          return false
+        }
+        if (selectedLane && getChampionLane(champ.id) !== selectedLane) {
+          return false
+        }
+        return true
+      })
+      .sort((a, b) => {
+        // Sort by lane order, then alphabetically
+        const laneA = getLaneIndex(getChampionLane(a.id))
+        const laneB = getLaneIndex(getChampionLane(b.id))
+        if (laneA !== laneB) return laneA - laneB
+        return a.name.localeCompare(b.name)
+      })
+  }, [championsList, searchTerm, selectedRoles, selectedLane])
 
   const handleChampionClick = (championId: string) => {
     // Edit mode: propose the edit and clear editing slot
@@ -174,9 +187,26 @@ export default function ChampionGrid({ onSelect, onLockIn, onHover, onProposeEdi
           placeholder="Search..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-48 px-3 py-1.5 bg-lol-gray border border-lol-border rounded text-sm text-white placeholder-gray-500 focus:outline-none focus:border-lol-gold transition"
+          className="w-40 px-3 py-1.5 bg-lol-gray border border-lol-border rounded text-sm text-white placeholder-gray-500 focus:outline-none focus:border-lol-gold transition"
           data-testid="draft-champion-search"
         />
+
+        {/* Lane filters */}
+        <div className="flex gap-1">
+          {LANE_ORDER.map(lane => (
+            <button
+              key={lane}
+              onClick={() => setSelectedLane(selectedLane === lane ? null : lane)}
+              className={`px-2 py-1 rounded text-xs uppercase tracking-wider transition border ${
+                selectedLane === lane
+                  ? 'bg-lol-blue-accent/20 border-lol-blue-accent text-lol-blue-accent'
+                  : 'bg-lol-gray border-lol-border text-gray-400 hover:border-lol-gold-dark hover:text-gray-300'
+              }`}
+            >
+              {LANE_DISPLAY_NAMES[lane]}
+            </button>
+          ))}
+        </div>
 
         {/* Role filters */}
         <div className="flex gap-1 flex-wrap flex-1">
@@ -214,7 +244,7 @@ export default function ChampionGrid({ onSelect, onLockIn, onHover, onProposeEdi
                   onMouseEnter={() => handleMouseEnter(champion.id)}
                   onMouseLeave={handleMouseLeave}
                   disabled={isDisabled}
-                  className={`relative w-48 h-48 overflow-hidden transition-all duration-150 border ${
+                  className={`relative w-20 h-20 overflow-hidden transition-all duration-150 border ${
                     isUsed
                       ? 'opacity-40 grayscale cursor-not-allowed border-transparent'
                       : isSelected
@@ -231,7 +261,7 @@ export default function ChampionGrid({ onSelect, onLockIn, onHover, onProposeEdi
                     loading="lazy"
                   />
                 </button>
-                <div className="text-sm text-lol-gold font-beaufort uppercase tracking-wider text-center truncate w-48">
+                <div className="text-xs text-lol-gold font-beaufort uppercase tracking-wider text-center truncate w-20">
                   {champion.name}
                 </div>
               </div>

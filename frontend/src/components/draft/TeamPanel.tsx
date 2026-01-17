@@ -164,7 +164,7 @@ export default function TeamPanel({ side, player, picks, isActive, hoveredChampi
   }
 
   return (
-    <div className={`w-56 bg-lol-dark-blue flex flex-col border-l border-r border-lol-border pb-4 ${
+    <div className={`w-72 bg-lol-dark-blue flex flex-col border-l border-r border-lol-border pb-4 ${
       isActive ? borderColor : ''
     }`} data-testid={`draft-team-panel-${side}`}>
       {/* Team Header */}

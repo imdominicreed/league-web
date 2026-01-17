@@ -20,6 +20,8 @@ function getAlgorithmBadgeColor(type: AlgorithmType): string {
       return 'bg-purple-600/20 text-purple-400'
     case 'lane_balanced':
       return 'bg-green-600/20 text-green-400'
+    case 'comfort_first':
+      return 'bg-teal-600/20 text-teal-400'
     default:
       return 'bg-gray-600/20 text-gray-400'
   }
@@ -128,6 +130,11 @@ export function MatchOptionCard({
         {option.algorithmType && (
           <span className={`px-2 py-0.5 rounded text-xs font-medium ${getAlgorithmBadgeColor(option.algorithmType)}`}>
             {ALGORITHM_LABELS[option.algorithmType] || option.algorithmType}
+          </span>
+        )}
+        {option.usedMmrThreshold > 0 && (
+          <span className="bg-gray-600/20 text-gray-400 px-2 py-0.5 rounded text-xs font-medium">
+            Within {option.usedMmrThreshold} ELO
           </span>
         )}
         <span className="text-xs text-gray-400">

@@ -165,8 +165,11 @@ func NewTestServer(t *testing.T) *TestServer {
 	hub := websocket.NewHub(repos.User, repos.RoomPlayer, repos.Champion, repos.Room, repos.DraftAction)
 	go hub.Run()
 
+	lobbyHub := websocket.NewLobbyHub(repos.Lobby, repos.LobbyPlayer, repos.MatchOption, repos.User)
+	go lobbyHub.Run()
+
 	services := service.NewServices(repos, cfg)
-	router := api.NewRouter(services, hub, repos, cfg)
+	router := api.NewRouter(services, hub, lobbyHub, repos, cfg)
 
 	server := httptest.NewServer(router)
 
@@ -181,6 +184,7 @@ func NewTestServer(t *testing.T) *TestServer {
 
 	t.Cleanup(func() {
 		hub.Stop()
+		lobbyHub.Stop()
 		server.Close()
 	})
 

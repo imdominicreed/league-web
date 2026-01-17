@@ -33,6 +33,9 @@ export const lobbyApi = {
   generateTeams: (lobbyId: string): Promise<MatchOption[]> =>
     api.post(`/lobbies/${lobbyId}/generate-teams`),
 
+  loadMoreTeams: (lobbyId: string): Promise<MatchOption[]> =>
+    api.post(`/lobbies/${lobbyId}/load-more-teams`),
+
   getMatchOptions: (lobbyId: string): Promise<MatchOption[]> =>
     api.get(`/lobbies/${lobbyId}/match-options`),
 

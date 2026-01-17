@@ -11,6 +11,7 @@ interface LobbyState {
   loading: boolean
   error: string | null
   generatingTeams: boolean
+  loadingMoreTeams: boolean
   selectingOption: boolean
   startingDraft: boolean
   createdRoom: Room | null
@@ -39,6 +40,7 @@ const initialState: LobbyState = {
   loading: false,
   error: null,
   generatingTeams: false,
+  loadingMoreTeams: false,
   selectingOption: false,
   startingDraft: false,
   createdRoom: null,
@@ -95,6 +97,13 @@ export const generateTeams = createAsyncThunk(
   'lobby/generateTeams',
   async (lobbyId: string) => {
     return await lobbyApi.generateTeams(lobbyId)
+  }
+)
+
+export const loadMoreTeams = createAsyncThunk(
+  'lobby/loadMoreTeams',
+  async (lobbyId: string) => {
+    return await lobbyApi.loadMoreTeams(lobbyId)
   }
 )
 
@@ -284,6 +293,62 @@ const lobbySlice = createSlice({
     setVotingStatus: (state, action: PayloadAction<VotingStatus | null>) => {
       state.votingStatus = action.payload
     },
+    // WebSocket event reducers
+    updatePlayerReady: (state, action: PayloadAction<{ userId: string; isReady: boolean }>) => {
+      if (state.lobby) {
+        const player = state.lobby.players.find(p => p.userId === action.payload.userId)
+        if (player) {
+          player.isReady = action.payload.isReady
+        }
+      }
+    },
+    updateStatus: (state, action: PayloadAction<string>) => {
+      if (state.lobby) {
+        state.lobby.status = action.payload as Lobby['status']
+      }
+    },
+    updateSelectedOption: (state, action: PayloadAction<number>) => {
+      if (state.lobby) {
+        state.lobby.selectedMatchOption = action.payload
+        state.lobby.status = 'team_selected'
+      }
+    },
+    updateVoteCounts: (state, action: PayloadAction<{ voteCounts: Record<number, number>; votesCast: number; voters?: Record<number, { userId: string; displayName: string }[]> }>) => {
+      if (state.votingStatus) {
+        state.votingStatus.voteCounts = action.payload.voteCounts
+        state.votingStatus.votesCast = action.payload.votesCast
+        if (action.payload.voters) {
+          state.votingStatus.voters = action.payload.voters
+        }
+      }
+    },
+    updatePendingActionApproval: (state, action: PayloadAction<{ approvedByBlue: boolean; approvedByRed: boolean }>) => {
+      if (state.pendingAction) {
+        state.pendingAction.approvedByBlue = action.payload.approvedByBlue
+        state.pendingAction.approvedByRed = action.payload.approvedByRed
+      }
+    },
+    updateRoomId: (state, action: PayloadAction<string>) => {
+      if (state.lobby) {
+        state.lobby.roomId = action.payload
+      }
+    },
+    updateCaptain: (state, action: PayloadAction<{ team: string; newCaptainId: string; oldCaptainId?: string }>) => {
+      if (state.lobby) {
+        // Remove captain status from old captain
+        if (action.payload.oldCaptainId) {
+          const oldCaptain = state.lobby.players.find(p => p.userId === action.payload.oldCaptainId)
+          if (oldCaptain) {
+            oldCaptain.isCaptain = false
+          }
+        }
+        // Set captain status on new captain
+        const newCaptain = state.lobby.players.find(p => p.userId === action.payload.newCaptainId)
+        if (newCaptain) {
+          newCaptain.isCaptain = true
+        }
+      }
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -346,6 +411,19 @@ const lobbySlice = createSlice({
       .addCase(generateTeams.rejected, (state, action) => {
         state.generatingTeams = false
         state.error = action.error.message || 'Failed to generate teams'
+      })
+      // Load more teams
+      .addCase(loadMoreTeams.pending, (state) => {
+        state.loadingMoreTeams = true
+        state.error = null
+      })
+      .addCase(loadMoreTeams.fulfilled, (state, action) => {
+        state.loadingMoreTeams = false
+        state.matchOptions = action.payload
+      })
+      .addCase(loadMoreTeams.rejected, (state, action) => {
+        state.loadingMoreTeams = false
+        state.error = action.error.message || 'Failed to load more teams'
       })
       // Fetch match options
       .addCase(fetchMatchOptions.fulfilled, (state, action) => {
@@ -580,5 +658,13 @@ export const {
   setPendingAction,
   setTeamStats,
   setVotingStatus,
+  // WebSocket event actions
+  updatePlayerReady,
+  updateStatus,
+  updateSelectedOption,
+  updateVoteCounts,
+  updatePendingActionApproval,
+  updateRoomId,
+  updateCaptain,
 } = lobbySlice.actions
 export default lobbySlice.reducer

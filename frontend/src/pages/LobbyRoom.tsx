@@ -4,9 +4,11 @@ import { useDispatch, useSelector } from 'react-redux'
 import { RootState, AppDispatch } from '@/store'
 import { LobbyPlayer } from '@/types'
 import { useSixSeven } from '@/hooks/useSixSeven'
+import { useLobbyWebSocket } from '@/hooks/useLobbyWebSocket'
 import {
   fetchLobby,
   fetchMatchOptions,
+  loadMoreTeams,
   startDraft,
   takeCaptain,
   promoteCaptain,
@@ -57,6 +59,7 @@ export default function LobbyRoom() {
     fetchingTeamStats,
     castingVote,
     endingVoting,
+    loadingMoreTeams,
   } = useSelector((state: RootState) => state.lobby)
   const { user } = useSelector((state: RootState) => state.auth)
   const { lobbyActions } = useSelector((state: RootState) => state.pendingActions)
@@ -68,21 +71,18 @@ export default function LobbyRoom() {
     return lobbyAction?.action ?? null
   }, [lobby, lobbyActions])
 
-  const [pollInterval, setPollInterval] = useState<ReturnType<typeof setInterval> | null>(null)
+  // WebSocket connection for real-time updates
+  // Use lobby.id (UUID) instead of lobbyId (might be short code from URL)
+  useLobbyWebSocket(lobby?.id)
 
   // Swap mode state
   const [swapMode, setSwapMode] = useState(false)
   const [selectedForSwap, setSelectedForSwap] = useState<string | null>(null)
 
-  // Polling for lobby state (pending actions are handled by unified polling in App.tsx)
+  // Single fetch on mount - WebSocket handles real-time updates
   useEffect(() => {
     if (lobbyId) {
       dispatch(fetchLobby(lobbyId))
-      const interval = setInterval(() => {
-        dispatch(fetchLobby(lobbyId))
-      }, 3000)
-      setPollInterval(interval)
-      return () => clearInterval(interval)
     }
   }, [lobbyId, dispatch])
 
@@ -100,32 +100,25 @@ export default function LobbyRoom() {
     }
   }, [lobby, teamStats, dispatch])
 
-  // Fetch voting status when voting is enabled
+  // Fetch voting status once when voting is enabled - WebSocket handles updates
   useEffect(() => {
-    if (lobby?.votingEnabled && lobby.status === 'matchmaking') {
+    if (lobby?.votingEnabled && lobby.status === 'matchmaking' && !votingStatus) {
       dispatch(fetchVotingStatus(lobby.id))
-      // Poll voting status more frequently when voting is active
-      const votingPollInterval = setInterval(() => {
-        dispatch(fetchVotingStatus(lobby.id))
-      }, 2000)
-      return () => clearInterval(votingPollInterval)
     }
-  }, [lobby?.id, lobby?.votingEnabled, lobby?.status, dispatch])
+  }, [lobby?.id, lobby?.votingEnabled, lobby?.status, votingStatus, dispatch])
 
   // Navigate to draft when it starts
   useEffect(() => {
     if (lobby?.status === 'drafting' && lobby.roomId) {
-      if (pollInterval) clearInterval(pollInterval)
       navigate(`/draft/${lobby.roomId}`)
     }
-  }, [lobby, navigate, pollInterval])
+  }, [lobby?.status, lobby?.roomId, navigate])
 
   useEffect(() => {
     if (createdRoom) {
-      if (pollInterval) clearInterval(pollInterval)
       navigate(`/draft/${createdRoom.id}`)
     }
-  }, [createdRoom, navigate, pollInterval])
+  }, [createdRoom, navigate])
 
   // Get current user's player info
   const currentPlayer = lobby?.players.find(p => p.userId === user?.id)
@@ -237,6 +230,10 @@ export default function LobbyRoom() {
 
   const handleEndVoting = useCallback((forceOption?: number) => {
     if (lobby) dispatch(endVoting({ lobbyId: lobby.id, forceOption }))
+  }, [lobby, dispatch])
+
+  const handleLoadMoreTeams = useCallback(() => {
+    if (lobby) dispatch(loadMoreTeams(lobby.id))
   }, [lobby, dispatch])
 
   if (loading && !lobby) {
@@ -426,6 +423,19 @@ export default function LobbyRoom() {
                 />
               ))}
             </div>
+            {/* Load More Teams - only during matchmaking for captains */}
+            {isCaptain && lobby.status === 'matchmaking' && (
+              <div className="text-center">
+                <button
+                  onClick={handleLoadMoreTeams}
+                  disabled={loadingMoreTeams}
+                  className="bg-purple-600/20 hover:bg-purple-600/30 text-purple-400 font-medium py-2 px-6 rounded-lg transition disabled:opacity-50"
+                  data-testid="lobby-button-load-more-teams"
+                >
+                  {loadingMoreTeams ? 'Loading...' : 'Load More Teams'}
+                </button>
+              </div>
+            )}
             {/* Start Draft for Captain */}
             {isCaptain && lobby.status === 'team_selected' && (
               <div className="text-center">

@@ -32,15 +32,18 @@ func main() {
 	// Initialize repositories
 	repos := postgres.NewRepositories(db)
 
-	// Initialize WebSocket hub
+	// Initialize WebSocket hubs
 	hub := websocket.NewHub(repos.User, repos.RoomPlayer, repos.Champion, repos.Room, repos.DraftAction)
 	go hub.Run()
+
+	lobbyHub := websocket.NewLobbyHub(repos.Lobby, repos.LobbyPlayer, repos.MatchOption, repos.User)
+	go lobbyHub.Run()
 
 	// Initialize services
 	services := service.NewServices(repos, cfg)
 
 	// Initialize router
-	router := api.NewRouter(services, hub, repos, cfg)
+	router := api.NewRouter(services, hub, lobbyHub, repos, cfg)
 
 	// Create server
 	srv := &http.Server{

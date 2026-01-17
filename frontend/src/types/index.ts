@@ -226,13 +226,14 @@ export interface TeamStats {
   laneDiffs: Record<Role, number>
 }
 
-export type AlgorithmType = 'mmr_balanced' | 'role_comfort' | 'hybrid' | 'lane_balanced'
+export type AlgorithmType = 'mmr_balanced' | 'role_comfort' | 'hybrid' | 'lane_balanced' | 'comfort_first'
 
 export const ALGORITHM_LABELS: Record<AlgorithmType, string> = {
   mmr_balanced: 'Most Balanced',
   role_comfort: 'Best Role Fit',
   hybrid: 'Balanced Overall',
   lane_balanced: 'Fair Lanes',
+  comfort_first: 'Best Comfort',
 }
 
 export const ALGORITHM_DESCRIPTIONS: Record<AlgorithmType, string> = {
@@ -240,6 +241,7 @@ export const ALGORITHM_DESCRIPTIONS: Record<AlgorithmType, string> = {
   role_comfort: 'Players get their preferred roles',
   hybrid: 'Balances MMR and role comfort',
   lane_balanced: 'No single lane is outmatched',
+  comfort_first: 'Prioritizes player comfort within ELO threshold',
 }
 
 export interface MatchOption {
@@ -252,6 +254,7 @@ export interface MatchOption {
   avgBlueComfort: number
   avgRedComfort: number
   maxLaneDiff: number
+  usedMmrThreshold: number
   assignments: MatchAssignment[]
 }
 

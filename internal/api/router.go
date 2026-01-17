@@ -13,7 +13,7 @@ import (
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 )
 
-func NewRouter(services *service.Services, hub *websocket.Hub, repos *repository.Repositories, cfg *config.Config) http.Handler {
+func NewRouter(services *service.Services, hub *websocket.Hub, lobbyHub *websocket.LobbyHub, repos *repository.Repositories, cfg *config.Config) http.Handler {
 	r := chi.NewRouter()
 
 	// Global middleware
@@ -32,11 +32,11 @@ func NewRouter(services *service.Services, hub *websocket.Hub, repos *repository
 	roomHandler := handlers.NewRoomHandler(services.Room, hub, repos.RoomPlayer)
 	championHandler := handlers.NewChampionHandler(services.Champion)
 	profileHandler := handlers.NewProfileHandler(services.Profile)
-	lobbyHandler := handlers.NewLobbyHandler(services.Lobby, services.Matchmaking, hub)
+	lobbyHandler := handlers.NewLobbyHandler(services.Lobby, services.Matchmaking, hub, lobbyHub)
 	matchHistoryHandler := handlers.NewMatchHistoryHandler(repos.Room, repos.DraftState, repos.DraftAction, repos.RoomPlayer)
 	simulationHandler := handlers.NewSimulationHandler(repos.Room, repos.DraftState, repos.DraftAction, repos.RoomPlayer, cfg)
 	pendingActionsHandler := handlers.NewPendingActionsHandler(repos.Lobby, repos.PendingAction, hub)
-	wsHandler := handlers.NewWebSocketHandler(hub, services.Auth)
+	wsHandler := handlers.NewWebSocketHandler(hub, lobbyHub, services.Auth)
 
 	// API v1 routes
 	r.Route("/api/v1", func(r chi.Router) {
@@ -105,6 +105,7 @@ func NewRouter(services *service.Services, hub *websocket.Hub, repos *repository
 				r.Post("/{idOrCode}/leave", lobbyHandler.Leave)
 				r.Post("/{idOrCode}/ready", lobbyHandler.SetReady)
 				r.Post("/{id}/generate-teams", lobbyHandler.GenerateTeams)
+				r.Post("/{id}/load-more-teams", lobbyHandler.LoadMoreTeams)
 				r.Get("/{id}/match-options", lobbyHandler.GetMatchOptions)
 				r.Post("/{id}/select-option", lobbyHandler.SelectOption)
 				r.Post("/{id}/start-draft", lobbyHandler.StartDraft)
@@ -134,8 +135,9 @@ func NewRouter(services *service.Services, hub *websocket.Hub, repos *repository
 			})
 		})
 
-		// WebSocket endpoint
+		// WebSocket endpoints
 		r.Get("/ws", wsHandler.Handle)
+		r.Get("/lobby-ws", wsHandler.HandleLobby)
 	})
 
 	return r
