@@ -73,7 +73,17 @@ export default function LobbyRoom() {
 
   // WebSocket connection for real-time updates
   // Use lobby.id (UUID) instead of lobbyId (might be short code from URL)
-  useLobbyWebSocket(lobby?.id)
+  const { kicked } = useLobbyWebSocket(lobby?.id)
+
+  // Handle being kicked from the lobby
+  useEffect(() => {
+    if (kicked) {
+      // Show notification to the kicked user
+      window.alert(`You have been kicked from the lobby by ${kicked.kickedBy}`)
+      // Redirect to home
+      navigate('/')
+    }
+  }, [kicked, navigate])
 
   // Swap mode state
   const [swapMode, setSwapMode] = useState(false)

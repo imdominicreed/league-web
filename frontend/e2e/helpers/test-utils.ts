@@ -161,3 +161,26 @@ export async function getVotingStatus(page: Page, token: string, lobbyId: string
   expect(res.ok()).toBeTruthy();
   return await res.json();
 }
+
+/**
+ * Kick a player from lobby via API
+ */
+export async function kickPlayer(page: Page, token: string, lobbyId: string, userId: string) {
+  const res = await page.request.post(`${API_BASE}/lobbies/${lobbyId}/kick`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { userId },
+  });
+  expect(res.ok()).toBeTruthy();
+  return await res.json();
+}
+
+/**
+ * Get lobby data via API
+ */
+export async function getLobby(page: Page, token: string, lobbyId: string) {
+  const res = await page.request.get(`${API_BASE}/lobbies/${lobbyId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(res.ok()).toBeTruthy();
+  return await res.json();
+}

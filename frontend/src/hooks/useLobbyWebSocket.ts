@@ -47,6 +47,10 @@ import { Lobby, LobbyStatus, VotingMode } from '@/types'
 
 const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/v1/lobby-ws`
 
+export interface KickedInfo {
+  kickedBy: string
+}
+
 export function useLobbyWebSocket(lobbyId: string | undefined) {
   const dispatch = useDispatch()
   const { accessToken, user } = useSelector((state: RootState) => state.auth)
@@ -55,6 +59,7 @@ export function useLobbyWebSocket(lobbyId: string | undefined) {
   const handleMessageRef = useRef<((msg: LobbyWSMessage) => void) | null>(null)
   const [isConnected, setIsConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [kicked, setKicked] = useState<KickedInfo | null>(null)
 
   // Handler for state sync
   const handleStateSync = useCallback((payload: LobbyStateSyncPayload) => {
@@ -196,8 +201,13 @@ export function useLobbyWebSocket(lobbyId: string | undefined) {
 
   // Handler for player kicked
   const handlePlayerKicked = useCallback((payload: PlayerKickedPayload) => {
+    // Check if the kicked player is the current user
+    if (user && payload.userId === user.id) {
+      console.log('[LobbyWS] Current user was kicked by:', payload.kickedBy)
+      setKicked({ kickedBy: payload.kickedBy })
+    }
     dispatch(removePlayer(payload.userId))
-  }, [dispatch])
+  }, [dispatch, user])
 
   // Handler for team stats updated
   const handleTeamStatsUpdated = useCallback((payload: TeamStatsUpdatedPayload) => {
@@ -370,5 +380,6 @@ export function useLobbyWebSocket(lobbyId: string | undefined) {
   return {
     isConnected,
     error,
+    kicked,
   }
 }
