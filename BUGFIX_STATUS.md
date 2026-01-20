@@ -19,7 +19,7 @@ Track bug fix progress and verification results.
 | BUG-004 | Medium | FIXED | Yes | Custom Timer Value Not Sent When Creating Lobby |
 | BUG-005 | Medium | PENDING | - | Ready Button Logic Should Be Removed |
 | BUG-006 | High | FIXED | Yes | Vote Button Click Does Not Trigger Vote Action |
-| BUG-007 | Medium | PENDING | - | Lobby UI Does Not Update in Real-Time After Swap Approval |
+| BUG-007 | Medium | FIXED | Yes | Lobby UI Does Not Update in Real-Time After Swap Approval |
 | BUG-008 | High | FIXED | Yes | Kicked Player Receives No Notification or Redirect |
 | BUG-009 | Medium | FIXED | Yes | Captain Indicator Shows for All Players in Lobby UI |
 | BUG-010 | High | FIXED | Yes | Promote Captain Fails After Team Selection |
@@ -121,4 +121,19 @@ dm.room.timerMgr.Start()
 - `lobbySlice.ts` correctly stores player data with `isCaptain` field intact
 **Conclusion**: The bug was either fixed in a previous commit or was an intermittent issue related to specific circumstances not captured. The functionality now works as expected with proper captain designation.
 **Verified By**: Playwright E2E test `frontend/e2e/bugs/bug-009.spec.ts` (2 tests pass)
+
+### BUG-007 - Lobby UI Does Not Update in Real-Time After Swap Approval
+**Fixed**: 2026-01-20
+**Status**: The reported bug could not be reproduced. Testing confirms that the UI updates correctly in real-time after a swap is approved.
+**Verification Details**:
+1. E2E test `bug-007.spec.ts` test 1: Creates 6-player lobby, blue captain proposes cross-team swap, red captain approves, verifies players swap positions WITHOUT page refresh
+2. E2E test `bug-007.spec.ts` test 2: Creates 4-player lobby with captain swap, verifies UI updates via WebSocket state sync
+**Technical Analysis**:
+- Backend correctly broadcasts `action_executed` followed by `lobby_state_sync` via WebSocket
+- `BroadcastLobbyUpdate()` in `lobby_hub.go` builds complete state sync payload with updated player positions
+- Frontend `handleStateSync()` in `useLobbyWebSocket.ts` correctly updates Redux state via `dispatch(setLobby(lobby))`
+- `handleActionExecuted()` clears pending action, then `handleStateSync()` updates player positions
+- React components correctly re-render when Redux state changes
+**Conclusion**: The real-time update functionality works as expected. Either the bug was fixed in a previous commit or was an intermittent issue. Both WebSocket events are properly propagated and the UI correctly reflects swapped player positions without requiring a page refresh.
+**Verified By**: Playwright E2E test `frontend/e2e/bugs/bug-007.spec.ts` (2 tests pass)
 
