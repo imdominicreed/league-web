@@ -628,7 +628,8 @@ func (s *LobbyService) PromoteCaptain(ctx context.Context, lobbyID, captainID, t
 		return err
 	}
 
-	if lobby.Status != domain.LobbyStatusWaitingForPlayers {
+	// Allow promoting captain in any lobby state before drafting starts
+	if lobby.Status == domain.LobbyStatusDrafting || lobby.Status == domain.LobbyStatusCompleted {
 		return ErrInvalidLobbyState
 	}
 

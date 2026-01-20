@@ -22,7 +22,7 @@ Track bug fix progress and verification results.
 | BUG-007 | Medium | PENDING | - | Lobby UI Does Not Update in Real-Time After Swap Approval |
 | BUG-008 | High | FIXED | Yes | Kicked Player Receives No Notification or Redirect |
 | BUG-009 | Medium | PENDING | - | Captain Indicator Shows for All Players in Lobby UI |
-| BUG-010 | High | PENDING | - | Promote Captain Fails After Team Selection |
+| BUG-010 | High | FIXED | Yes | Promote Captain Fails After Team Selection |
 | BUG-011 | High | PENDING | - | Draft Timer Resets on Unpause Instead of Resuming |
 
 ---
@@ -47,4 +47,22 @@ Track bug fix progress and verification results.
 2. In `handlePlayerKicked`, check if `payload.userId === user.id` and set kicked state with kicker's name
 3. In `LobbyRoom.tsx`, added useEffect that watches `kicked` state and shows alert then redirects to home
 **Verified By**: Playwright E2E test `frontend/e2e/bugs/bug-008.spec.ts` (2 tests pass)
+
+### BUG-010 - Promote Captain Fails After Team Selection
+**Fixed**: 2026-01-20
+**Fix Location**: `internal/service/lobby_service.go` (line 631-633)
+**Root Cause**: The `PromoteCaptain` method had an overly restrictive lobby status check that only allowed promotion in `waiting_for_players` status, while `TakeCaptain` correctly allowed it in any state except `drafting` and `completed`.
+**Solution**: Updated the status check in `PromoteCaptain` to use the same logic as `TakeCaptain`:
+```go
+// Before (too restrictive):
+if lobby.Status != domain.LobbyStatusWaitingForPlayers {
+    return ErrInvalidLobbyState
+}
+
+// After (matches TakeCaptain behavior):
+if lobby.Status == domain.LobbyStatusDrafting || lobby.Status == domain.LobbyStatusCompleted {
+    return ErrInvalidLobbyState
+}
+```
+**Verified By**: Playwright E2E test `frontend/e2e/bugs/bug-010.spec.ts` (3 tests pass)
 

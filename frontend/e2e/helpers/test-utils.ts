@@ -184,3 +184,47 @@ export async function getLobby(page: Page, token: string, lobbyId: string) {
   expect(res.ok()).toBeTruthy();
   return await res.json();
 }
+
+/**
+ * Select a match option for a lobby via API (raw response for error checking)
+ */
+export async function selectMatchOptionRaw(page: Page, token: string, lobbyId: string, optionNumber: number) {
+  return await page.request.post(`${API_BASE}/lobbies/${lobbyId}/select-option`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { optionNumber },
+  });
+}
+
+/**
+ * Select a match option for a lobby via API
+ */
+export async function selectMatchOption(page: Page, token: string, lobbyId: string, optionNumber: number) {
+  const res = await selectMatchOptionRaw(page, token, lobbyId, optionNumber);
+  if (!res.ok()) {
+    console.log('selectMatchOption failed:', res.status(), await res.text());
+  }
+  expect(res.ok()).toBeTruthy();
+  return await res.json();
+}
+
+/**
+ * Promote a player to captain via API (raw response for error checking)
+ */
+export async function promoteCaptainRaw(page: Page, token: string, lobbyId: string, userId: string) {
+  return await page.request.post(`${API_BASE}/lobbies/${lobbyId}/promote-captain`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { userId },
+  });
+}
+
+/**
+ * Promote a player to captain via API
+ */
+export async function promoteCaptain(page: Page, token: string, lobbyId: string, userId: string) {
+  const res = await promoteCaptainRaw(page, token, lobbyId, userId);
+  if (!res.ok()) {
+    console.log('promoteCaptain failed:', res.status(), await res.text());
+  }
+  expect(res.ok()).toBeTruthy();
+  return await res.json();
+}
