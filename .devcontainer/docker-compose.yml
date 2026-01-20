@@ -11,7 +11,7 @@
 
 services:
   dev:
-    env_file: .env
+    env_file: ../.env
     build:
       context: .
       dockerfile: Dockerfile
@@ -20,6 +20,8 @@ services:
         USER_GID: ${USER_GID:-1000}
     volumes:
       - ..:/workspaces/project:cached
+      # Mount worktree at same host path so git worktree paths resolve correctly
+      - ${WORKTREE_DIR:-/tmp/empty}:${WORKTREE_DIR:-/tmp/empty}:cached
       # Mount main .git at same path for worktree support
       - ${MAIN_GIT_DIR:-/tmp/empty}:${MAIN_GIT_DIR:-/tmp/empty}:cached
       - ${CHEZMOI_SOURCE:-~/.local/share/chezmoi}:/home/dev/.local/share/chezmoi:ro
@@ -47,6 +49,8 @@ services:
     tty: true
     working_dir: /workspaces/project
     command: sleep infinity
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - traefik-dev
       - default
