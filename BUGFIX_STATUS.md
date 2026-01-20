@@ -15,7 +15,7 @@ Track bug fix progress and verification results.
 | Bug ID | Severity | Status | Verified | Notes |
 |--------|----------|--------|----------|-------|
 | BUG-001 | Medium | FIXED | Yes | No Logout Button on Home Page |
-| BUG-002 | Low | PENDING | - | Login Page Accessible When Authenticated |
+| BUG-002 | Low | FIXED | Yes | Login Page Accessible When Authenticated |
 | BUG-004 | Medium | FIXED | Yes | Custom Timer Value Not Sent When Creating Lobby |
 | BUG-005 | Medium | PENDING | - | Ready Button Logic Should Be Removed |
 | BUG-006 | High | FIXED | Yes | Vote Button Click Does Not Trigger Vote Action |
@@ -136,4 +136,26 @@ dm.room.timerMgr.Start()
 - React components correctly re-render when Redux state changes
 **Conclusion**: The real-time update functionality works as expected. Either the bug was fixed in a previous commit or was an intermittent issue. Both WebSocket events are properly propagated and the UI correctly reflects swapped player positions without requiring a page refresh.
 **Verified By**: Playwright E2E test `frontend/e2e/bugs/bug-007.spec.ts` (2 tests pass)
+
+### BUG-002 - Login Page Accessible When Authenticated
+**Fixed**: 2026-01-20
+**Fix Location**: `frontend/src/pages/Login.tsx` (lines 1, 12, 14-19) and `frontend/src/pages/Register.tsx` (lines 1, 12, 14-19)
+**Root Cause**: The Login and Register pages did not check if the user was already authenticated. Users could navigate directly to `/login` or `/register` while logged in.
+**Solution**:
+1. Added `useEffect` import to both Login.tsx and Register.tsx
+2. Added `isAuthenticated` to the destructured auth state from Redux
+3. Added useEffect hook that checks `isAuthenticated` and redirects to home page if true:
+```tsx
+useEffect(() => {
+  if (isAuthenticated) {
+    navigate('/')
+  }
+}, [isAuthenticated, navigate])
+```
+**Verification Details**:
+1. E2E test `bug-002.spec.ts` test 1: Authenticated user navigating to /login is redirected to home
+2. E2E test `bug-002.spec.ts` test 2: Authenticated user navigating to /register is redirected to home
+3. E2E test `bug-002.spec.ts` test 3: Unauthenticated user can access /login normally
+4. E2E test `bug-002.spec.ts` test 4: Unauthenticated user can access /register normally
+**Verified By**: Playwright E2E test `frontend/e2e/bugs/bug-002.spec.ts` (4 tests pass)
 
