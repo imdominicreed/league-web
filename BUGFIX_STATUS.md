@@ -16,7 +16,7 @@ Track bug fix progress and verification results.
 |--------|----------|--------|----------|-------|
 | BUG-001 | Medium | FIXED | Yes | No Logout Button on Home Page |
 | BUG-002 | Low | PENDING | - | Login Page Accessible When Authenticated |
-| BUG-004 | Medium | PENDING | - | Custom Timer Value Not Sent When Creating Lobby |
+| BUG-004 | Medium | FIXED | Yes | Custom Timer Value Not Sent When Creating Lobby |
 | BUG-005 | Medium | PENDING | - | Ready Button Logic Should Be Removed |
 | BUG-006 | High | FIXED | Yes | Vote Button Click Does Not Trigger Vote Action |
 | BUG-007 | Medium | PENDING | - | Lobby UI Does Not Update in Real-Time After Swap Approval |
@@ -90,4 +90,21 @@ dm.room.timerMgr.Start()
 3. Added a red "Logout" button at the bottom of the authenticated user's navigation links
 4. Button has `data-testid="home-logout-button"` for E2E testing
 **Verified By**: Playwright E2E test `frontend/e2e/bugs/bug-001.spec.ts` (3 tests pass)
+
+### BUG-004 - Custom Timer Value Not Sent When Creating Lobby
+**Fixed**: 2026-01-20
+**Status**: The reported bug could not be reproduced. Testing confirms that custom timer values are correctly sent to the API and stored in the database.
+**Verification Details**:
+1. E2E test `bug-004.spec.ts` test 1: Captures the API request when creating a lobby via UI with timer=60 - confirms `timerDurationSeconds: 60` is sent
+2. E2E test `bug-004.spec.ts` test 2: Creates lobby via API with timer=45 - confirms lobby is created with correct value
+3. E2E test `bug-004.spec.ts` test 3: Creates lobby via UI with timer=90 - confirms successful lobby creation
+**Technical Analysis**:
+- `CreateLobby.tsx` line 14: `useState(30)` initializes timer state
+- `CreateLobby.tsx` line 58: `onChange={(e) => setTimerDuration(Number(e.target.value))}` correctly updates state
+- `CreateLobby.tsx` line 21: `timerDurationSeconds: timerDuration` passes state to Redux action
+- `lobbySlice.ts` line 62-63: Passes data to `lobbyApi.create(data)`
+- `lobby.ts` line 18-19: Sends POST request to `/lobbies` with JSON body
+- Backend correctly receives and stores the value (validated in test 2)
+**Conclusion**: Either the bug was fixed in a previous commit or was an intermittent issue. The functionality now works as expected.
+**Verified By**: Playwright E2E test `frontend/e2e/bugs/bug-004.spec.ts` (3 tests pass)
 
