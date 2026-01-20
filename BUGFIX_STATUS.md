@@ -17,7 +17,7 @@ Track bug fix progress and verification results.
 | BUG-001 | Medium | FIXED | Yes | No Logout Button on Home Page |
 | BUG-002 | Low | FIXED | Yes | Login Page Accessible When Authenticated |
 | BUG-004 | Medium | FIXED | Yes | Custom Timer Value Not Sent When Creating Lobby |
-| BUG-005 | Medium | PENDING | - | Ready Button Logic Should Be Removed |
+| BUG-005 | Medium | BLOCKED | - | Ready Button Logic Should Be Removed (refactoring task) |
 | BUG-006 | High | FIXED | Yes | Vote Button Click Does Not Trigger Vote Action |
 | BUG-007 | Medium | FIXED | Yes | Lobby UI Does Not Update in Real-Time After Swap Approval |
 | BUG-008 | High | FIXED | Yes | Kicked Player Receives No Notification or Redirect |
@@ -158,4 +158,32 @@ useEffect(() => {
 3. E2E test `bug-002.spec.ts` test 3: Unauthenticated user can access /login normally
 4. E2E test `bug-002.spec.ts` test 4: Unauthenticated user can access /register normally
 **Verified By**: Playwright E2E test `frontend/e2e/bugs/bug-002.spec.ts` (4 tests pass)
+
+### BUG-005 - Ready Button Logic Should Be Removed
+**Status**: BLOCKED (Requires separate refactoring PR)
+**Reason**: This is a large-scale code cleanup/refactoring task rather than a traditional bug fix. The "ready" functionality spans:
+- **Backend**: 8+ files including router, handlers, service layer, domain models, WebSocket layer
+- **Frontend**: 10+ files including API, Redux, WebSocket hooks, components, types
+- **Database**: The `is_ready` column exists in the `lobby_players` table schema
+
+**Current State Analysis**:
+1. The `LobbyPlayerGrid` component with the "Ready Up" button exists but is NOT used in `LobbyRoom.tsx`
+2. The ready status UI (green/gray dots) and ready count ("X ready") are displayed but non-functional
+3. `CanStartMatchmaking()` in `domain/lobby.go` checks if all players are ready, but this check is bypassed in practice
+4. The ready API endpoint `/api/v1/lobbies/:id/ready` exists but isn't called by the frontend
+
+**Impact**:
+- The unused ready code causes no functional bugs - it's dead code
+- Removing it would improve code maintainability but requires careful coordination
+- Database migration would be needed to remove the `is_ready` column
+
+**Recommendation**: Create a separate refactoring PR with:
+1. Remove backend ready endpoint and service method
+2. Remove ready checks from `CanStartMatchmaking()`
+3. Remove frontend ready API, Redux thunk, and WebSocket handler
+4. Remove ready UI indicators (dots, count)
+5. Database migration to drop `is_ready` column
+6. Update all tests that reference ready status
+
+This cleanup should be done as a focused refactoring effort, not mixed with bug fixes.
 
