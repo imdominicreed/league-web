@@ -21,7 +21,7 @@ Track bug fix progress and verification results.
 | BUG-006 | High | FIXED | Yes | Vote Button Click Does Not Trigger Vote Action |
 | BUG-007 | Medium | PENDING | - | Lobby UI Does Not Update in Real-Time After Swap Approval |
 | BUG-008 | High | FIXED | Yes | Kicked Player Receives No Notification or Redirect |
-| BUG-009 | Medium | PENDING | - | Captain Indicator Shows for All Players in Lobby UI |
+| BUG-009 | Medium | FIXED | Yes | Captain Indicator Shows for All Players in Lobby UI |
 | BUG-010 | High | FIXED | Yes | Promote Captain Fails After Team Selection |
 | BUG-011 | High | FIXED | Yes | Draft Timer Resets on Unpause Instead of Resuming |
 
@@ -107,4 +107,18 @@ dm.room.timerMgr.Start()
 - Backend correctly receives and stores the value (validated in test 2)
 **Conclusion**: Either the bug was fixed in a previous commit or was an intermittent issue. The functionality now works as expected.
 **Verified By**: Playwright E2E test `frontend/e2e/bugs/bug-004.spec.ts` (3 tests pass)
+
+### BUG-009 - Captain Indicator Shows for All Players in Lobby UI
+**Fixed**: 2026-01-20
+**Status**: The reported bug could not be reproduced. Testing confirms that captain badges are correctly displayed only for actual captains.
+**Verification Details**:
+1. E2E test `bug-009.spec.ts` test 1: Creates 4-player lobby, verifies API returns exactly 2 captains (one blue, one red), and UI shows exactly 2 captain badges
+2. E2E test `bug-009.spec.ts` test 2: Creates 6-player lobby, verifies API returns exactly 2 captains and UI shows exactly 2 captain badges
+**Technical Analysis**:
+- API correctly returns `isCaptain: true` only for the first player to join each team
+- `TeamColumn.tsx` line 86-88: Correctly renders captain "C" badge only when `player.isCaptain` is `true`
+- `toLobbyPlayer()` in `lobbyWebSocket.ts` correctly passes through `isCaptain` field from backend
+- `lobbySlice.ts` correctly stores player data with `isCaptain` field intact
+**Conclusion**: The bug was either fixed in a previous commit or was an intermittent issue related to specific circumstances not captured. The functionality now works as expected with proper captain designation.
+**Verified By**: Playwright E2E test `frontend/e2e/bugs/bug-009.spec.ts` (2 tests pass)
 
