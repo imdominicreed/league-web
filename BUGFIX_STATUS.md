@@ -14,7 +14,7 @@ Track bug fix progress and verification results.
 
 | Bug ID | Severity | Status | Verified | Notes |
 |--------|----------|--------|----------|-------|
-| BUG-001 | Medium | PENDING | - | No Logout Button on Home Page |
+| BUG-001 | Medium | FIXED | Yes | No Logout Button on Home Page |
 | BUG-002 | Low | PENDING | - | Login Page Accessible When Authenticated |
 | BUG-004 | Medium | PENDING | - | Custom Timer Value Not Sent When Creating Lobby |
 | BUG-005 | Medium | PENDING | - | Ready Button Logic Should Be Removed |
@@ -79,4 +79,15 @@ dm.room.timerMgr.SetDuration(dm.timerDuration)
 dm.room.timerMgr.Start()
 ```
 **Verified By**: Playwright E2E test `frontend/e2e/bugs/bug-011.spec.ts` (3 tests pass)
+
+### BUG-001 - No Logout Button on Home Page
+**Fixed**: 2026-01-20
+**Fix Location**: `frontend/src/pages/Home.tsx` (lines 1-15, 75-81)
+**Root Cause**: The Home page displayed a welcome message for authenticated users but provided no logout mechanism. The logout Redux action and API endpoint existed but were not connected to any UI element.
+**Solution**:
+1. Added `useDispatch` hook and imported `logout` action from authSlice
+2. Created `handleLogout` function that dispatches the logout action
+3. Added a red "Logout" button at the bottom of the authenticated user's navigation links
+4. Button has `data-testid="home-logout-button"` for E2E testing
+**Verified By**: Playwright E2E test `frontend/e2e/bugs/bug-001.spec.ts` (3 tests pass)
 

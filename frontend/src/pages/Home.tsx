@@ -1,12 +1,18 @@
 import { Link } from 'react-router-dom'
-import { useSelector } from 'react-redux'
-import { RootState } from '@/store'
+import { useSelector, useDispatch } from 'react-redux'
+import { RootState, AppDispatch } from '@/store'
+import { logout } from '@/store/slices/authSlice'
 import { useSixSeven } from '@/hooks/useSixSeven'
 import { SixSevenOverlay } from '@/components/SixSevenOverlay'
 
 export default function Home() {
+  const dispatch = useDispatch<AppDispatch>()
   const { isAuthenticated, user } = useSelector((state: RootState) => state.auth)
   const { isShaking } = useSixSeven(0)
+
+  const handleLogout = () => {
+    dispatch(logout())
+  }
 
   return (
     <div className={`min-h-screen flex flex-col items-center justify-center p-8 ${isShaking ? 'six-seven-shake' : ''}`}>
@@ -66,6 +72,13 @@ export default function Home() {
             >
               Join 10-Man Lobby
             </Link>
+            <button
+              onClick={handleLogout}
+              className="bg-red-600 text-white font-semibold py-3 px-6 rounded-lg text-center hover:bg-red-700 transition mt-4"
+              data-testid="home-logout-button"
+            >
+              Logout
+            </button>
           </>
         ) : (
           <>
