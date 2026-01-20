@@ -282,7 +282,10 @@ func (dm *DraftStateManager) advancePhase() {
 		dm.timerDuration,
 	)
 
-	// Start timer for next phase
+	// Reset timer duration to full duration and start timer for next phase
+	// This is necessary because SetDuration() may have been called with a
+	// partial duration when resuming from pause
+	dm.room.timerMgr.SetDuration(dm.timerDuration)
 	dm.room.timerMgr.Start()
 }
 

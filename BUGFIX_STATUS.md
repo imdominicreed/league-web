@@ -23,7 +23,7 @@ Track bug fix progress and verification results.
 | BUG-008 | High | FIXED | Yes | Kicked Player Receives No Notification or Redirect |
 | BUG-009 | Medium | PENDING | - | Captain Indicator Shows for All Players in Lobby UI |
 | BUG-010 | High | FIXED | Yes | Promote Captain Fails After Team Selection |
-| BUG-011 | High | PENDING | - | Draft Timer Resets on Unpause Instead of Resuming |
+| BUG-011 | High | FIXED | Yes | Draft Timer Resets on Unpause Instead of Resuming |
 
 ---
 
@@ -65,4 +65,18 @@ if lobby.Status == domain.LobbyStatusDrafting || lobby.Status == domain.LobbySta
 }
 ```
 **Verified By**: Playwright E2E test `frontend/e2e/bugs/bug-010.spec.ts` (3 tests pass)
+
+### BUG-011 - Draft Timer Resets on Unpause Instead of Resuming
+**Fixed**: 2026-01-20
+**Fix Location**: `internal/websocket/draft_state.go` (line 288)
+**Root Cause**: After resuming from pause, the `durationMs` field in `TimerManager` was set to the remaining time from the pause. When `advancePhase()` was called for subsequent phases, it called `timerMgr.Start()` without resetting the duration to the original timer value. This caused all phases after the first resume to use the wrong (reduced) timer duration.
+**Solution**: Added `dm.room.timerMgr.SetDuration(dm.timerDuration)` call before `timerMgr.Start()` in `advancePhase()` to ensure each new phase always starts with the full timer duration:
+```go
+// Reset timer duration to full duration and start timer for next phase
+// This is necessary because SetDuration() may have been called with a
+// partial duration when resuming from pause
+dm.room.timerMgr.SetDuration(dm.timerDuration)
+dm.room.timerMgr.Start()
+```
+**Verified By**: Playwright E2E test `frontend/e2e/bugs/bug-011.spec.ts` (3 tests pass)
 
