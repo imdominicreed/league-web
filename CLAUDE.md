@@ -54,9 +54,6 @@ make sync-champions
 
 # Run all backend tests (Docker available for testcontainers)
 go test ./...
-
-# Run frontend E2E tests (start backend first)
-cd frontend && npx playwright test
 ```
 
 ## Architecture
@@ -231,6 +228,10 @@ Environment is pre-configured in the devcontainer. A `.env` file exists at proje
 
 ## Testing
 
+### Manual Testing
+
+Use the Playwright MCP CLI for browser automation and manual testing.
+
 ### Backend Tests
 
 Docker is available via mounted socket - testcontainers work out of the box.
@@ -241,17 +242,6 @@ go test ./... -v                       # Verbose
 go test ./... -race                    # Race detection
 go test ./... -short                   # Skip slow tests
 go test ./internal/api/handlers/...   # Specific package
-```
-
-### Frontend E2E Tests
-
-Requires backend running on port 9999.
-
-```bash
-cd frontend
-npx playwright test                    # All E2E tests
-npx playwright test --ui               # Interactive mode
-npx playwright test lobby.spec.ts      # Specific test file
 ```
 
 ### Test Framework (`internal/testutil/`)
@@ -277,17 +267,6 @@ npx playwright test lobby.spec.ts      # Specific test file
 **WebSocket client** (`WSClient`): `JoinRoom()`, `Ready()`, `StartDraft()`, `SelectChampion()`, `LockIn()`, `ExpectStateSync()`, `ExpectPhaseChanged()`, `ExpectError()`
 
 **Assertions**: `AssertStatusCode()`, `AssertJSONResponse()`, `AssertErrorResponse()`, `AssertContainsChampion()`
-
-### Frontend E2E Framework (`frontend/e2e/`)
-
-Uses **Playwright** with page objects and multi-user fixtures.
-
-| Fixture | Purpose |
-|---------|---------|
-| `pages.ts` | Page objects: `HomePage`, `LoginPage`, `RegisterPage`, `CreateLobbyPage`, `LobbyRoomPage` |
-| `multi-user.ts` | `createUsers(n)` creates N authenticated browser contexts, `lobbyWithUsers(n)` creates lobby with N users |
-
-**API helpers**: `registerUserViaApi()`, `createLobbyViaApi()`, `joinLobbyViaApi()`, `setReadyViaApi()`, `generateTeams()`, `selectMatchOption()`
 
 ## Notes
 
