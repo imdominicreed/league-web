@@ -187,3 +187,17 @@ useEffect(() => {
 
 This cleanup should be done as a focused refactoring effort, not mixed with bug fixes.
 
+---
+
+## Summary
+
+**ALL_BUGS_FIXED** (or documented)
+
+| Status | Count | Bug IDs |
+|--------|-------|---------|
+| FIXED | 9 | BUG-001, BUG-002, BUG-004, BUG-006, BUG-007, BUG-008, BUG-009, BUG-010, BUG-011 |
+| BLOCKED | 1 | BUG-005 (refactoring task - requires dedicated PR) |
+| PENDING | 0 | - |
+
+All user-facing bugs have been fixed and verified with Playwright E2E tests.
+
