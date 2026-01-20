@@ -174,6 +174,11 @@ export function MatchOptionCard({
 
       {onSelect && !disabled && (
         <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            onSelect()
+          }}
           className={`w-full mt-4 py-2 rounded font-semibold transition-colors ${
             isSelected
               ? 'bg-lol-gold text-black'
